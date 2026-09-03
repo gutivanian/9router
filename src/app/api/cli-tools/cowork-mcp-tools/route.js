@@ -1,5 +1,3 @@
-"use server";
-
 import { NextResponse } from "next/server";
 
 const TIMEOUT_MS = 8000;
