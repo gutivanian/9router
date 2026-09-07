@@ -310,6 +310,31 @@ export async function saveRequestUsage(entry) {
       pushToRing(entry);
       scheduleStatsEvent("update", 250);
     }
+
+    // TPM/TPD is only knowable post-hoc, once actual token usage is in (unlike
+    // RPM/RPD, which auth.js bumps at selection time — see src/lib/rateLimits.js
+    // for why). Cheap to skip: nextStateForTokens itself returns null fast when
+    // neither the key nor its group has a TPM/TPD configured, so the common case
+    // (no rate limits set at all) costs one extra connection read, no write.
+    if (inserted && entry.connectionId && entry.connectionId !== "noauth" && entry.model) {
+      const tokensUsed = promptTokens + completionTokens;
+      if (tokensUsed > 0) {
+        try {
+          const { getProviderConnectionById, bumpRateLimitCounters } = await import("./connectionsRepo.js");
+          const { getSettings } = await import("./settingsRepo.js");
+          const { nextStateForTokens } = await import("../../rateLimits.js");
+          const conn = await getProviderConnectionById(entry.connectionId);
+          if (conn) {
+            const settings = await getSettings();
+            const groupRateLimits = (settings.groupRateLimits || {})[entry.provider] || {};
+            const patch = nextStateForTokens(conn, entry.model, groupRateLimits, tokensUsed);
+            if (patch) await bumpRateLimitCounters(conn.id, entry.model, patch);
+          }
+        } catch (e) {
+          console.error("Failed to bump token rate-limit counters:", e);
+        }
+      }
+    }
   } catch (e) {
     console.error("Failed to save usage stats:", e);
   }
