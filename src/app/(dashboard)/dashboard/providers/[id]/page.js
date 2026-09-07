@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { getProviderIconSrc, markProviderIconMissing } from "@/shared/utils/providerIcon";
-import { Card, Button, Badge, Input, Modal, CardSkeleton, OAuthModal, KiroOAuthWrapper, CursorAuthModal, IFlowCookieModal, GitLabAuthModal, Toggle, Select, EditConnectionModal, NoAuthProxyCard, ConfirmModal } from "@/shared/components";
+import { Card, Button, Badge, Input, Modal, CardSkeleton, OAuthModal, KiroOAuthWrapper, CursorAuthModal, IFlowCookieModal, GitLabAuthModal, Toggle, Select, EditConnectionModal, RateLimitsModal, NoAuthProxyCard, ConfirmModal } from "@/shared/components";
 import { OAUTH_PROVIDERS, APIKEY_PROVIDERS, FREE_PROVIDERS, FREE_TIER_PROVIDERS, WEB_COOKIE_PROVIDERS, getProviderAlias, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, AI_PROVIDERS } from "@/shared/constants/providers";
 import { getModelsByProviderId, getModelKind } from "@/shared/constants/models";
 import { getThinkingLevels } from "open-sse/providers/thinkingLevels.js";
@@ -51,6 +51,9 @@ export default function ProviderDetailPage() {
   const [showBulkImportCodex, setShowBulkImportCodex] = useState(false);
   const [showBulkImportGrokCli, setShowBulkImportGrokCli] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [rateLimitsConnection, setRateLimitsConnection] = useState(null);
+  const [groupRateLimits, setGroupRateLimits] = useState({}); // settings.groupRateLimits[providerId] — group defaults
+  const [editingGroupLimits, setEditingGroupLimits] = useState(null); // group name string, or null
   const [showEditNodeModal, setShowEditNodeModal] = useState(false);
   const [showBulkProxyModal, setShowBulkProxyModal] = useState(false);
   const [selectedConnection, setSelectedConnection] = useState(null);
@@ -176,6 +179,12 @@ export default function ProviderDetailPage() {
     return levels && levels.includes(thinkingMode) ? thinkingMode : null;
   };
   const providerStorageAlias = isCompatible ? providerId : providerAlias;
+  // Search/dropdown source for the Rate Limits modal's "Add Model" field —
+  // every model already known for this provider (registry + any custom ones).
+  const rateLimitModelOptions = [...new Set([
+    ...models.map((m) => m.id),
+    ...customModels.filter((m) => m.providerAlias === providerStorageAlias).map((m) => m.id),
+  ])].sort();
   // Union of levels across this provider's reasoning models — drives the level picker options.
   // Include custom models too (e.g. manually added gpt-5.6-sol → max).
   const providerThinkingLevels = (() => {
@@ -490,6 +499,20 @@ export default function ProviderDetailPage() {
     fetchCustomModels();
     fetchDisabledModels();
   }, [fetchConnections, fetchAliases, fetchCustomModels, fetchDisabledModels]);
+
+  // Group-level default rate limits (settings.groupRateLimits[providerId][group]) —
+  // only this provider's slice is kept in state; saves re-fetch the full settings
+  // object fresh so other providers' group defaults are never clobbered.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/settings")
+      .then((res) => (res.ok ? res.json() : {}))
+      .then((data) => {
+        if (!cancelled) setGroupRateLimits((data.groupRateLimits || {})[providerId] || {});
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [providerId]);
 
   // Cursor's model availability is account-specific and changes frequently.
   // Load the active account's live catalog for the dashboard; the static
@@ -835,6 +858,51 @@ export default function ProviderDetailPage() {
     }
   };
 
+  const handleUpdateRateLimits = async (rateLimits) => {
+    if (!rateLimitsConnection) return;
+    try {
+      const res = await fetch(`/api/providers/${rateLimitsConnection.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rateLimits }),
+      });
+      if (res.ok) {
+        setConnections(prev => prev.map(c => c.id === rateLimitsConnection.id ? { ...c, rateLimits } : c));
+        setRateLimitsConnection(null);
+      }
+    } catch (error) {
+      console.log("Error updating rate limits:", error);
+    }
+  };
+
+  const handleSaveGroupRateLimits = async (group, limits) => {
+    try {
+      // Re-fetch full settings fresh (this page only keeps this provider's slice in
+      // state) so other providers' group defaults are never clobbered by this save.
+      const res = await fetch("/api/settings");
+      const settingsData = res.ok ? await res.json() : {};
+      const allGroupRateLimits = settingsData.groupRateLimits || {};
+      const providerGroups = { ...(allGroupRateLimits[providerId] || {}) };
+      if (limits && Object.keys(limits).length > 0) providerGroups[group] = limits;
+      else delete providerGroups[group];
+      const updated = { ...allGroupRateLimits };
+      if (Object.keys(providerGroups).length > 0) updated[providerId] = providerGroups;
+      else delete updated[providerId];
+
+      const patchRes = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ groupRateLimits: updated }),
+      });
+      if (patchRes.ok) {
+        setGroupRateLimits(providerGroups);
+        setEditingGroupLimits(null);
+      }
+    } catch (error) {
+      console.log("Error updating group rate limits:", error);
+    }
+  };
+
   const handleUpdateConnectionStatus = async (id, isActive) => {
     try {
       const res = await fetch(`/api/providers/${id}`, {
@@ -1074,6 +1142,7 @@ export default function ProviderDetailPage() {
                   setSelectedConnection(conn);
                   setShowEditModal(true);
                 }}
+                onEditRateLimits={() => setRateLimitsConnection(conn)}
                 onDelete={() => handleDelete(conn.id)}
                 oneByOneStatus={oneByOneResults[conn.id] || null}
               />
@@ -1684,14 +1753,23 @@ export default function ProviderDetailPage() {
                     <span className="text-xs text-text-muted">{visibleConnections.length} of {connections.length}</span>
                   )}
                   {connectionGroups.map((g) => (
-                    <button
-                      key={g}
-                      type="button"
-                      onClick={() => setConnFilter(connFilter.trim() === g ? "" : g)}
-                      className={`rounded-full border px-2 py-0.5 text-xs ${connFilter.trim() === g ? "border-primary text-primary" : "border-black/10 text-text-muted hover:text-primary dark:border-white/10"}`}
-                    >
-                      {g}
-                    </button>
+                    <div key={g} className="flex items-center gap-0.5">
+                      <button
+                        type="button"
+                        onClick={() => setConnFilter(connFilter.trim() === g ? "" : g)}
+                        className={`rounded-full border px-2 py-0.5 text-xs ${connFilter.trim() === g ? "border-primary text-primary" : "border-black/10 text-text-muted hover:text-primary dark:border-white/10"}`}
+                      >
+                        {g}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditingGroupLimits(g)}
+                        className={`rounded-full p-1 transition-colors hover:bg-black/5 dark:hover:bg-white/5 ${groupRateLimits[g] ? "text-primary" : "text-text-muted hover:text-primary"}`}
+                        title={`Default rate limits for group "${g}"`}
+                      >
+                        <span className="material-symbols-outlined text-[14px]">speed</span>
+                      </button>
+                    </div>
                   ))}
                 </div>
               )}
@@ -1951,6 +2029,28 @@ export default function ProviderDetailPage() {
         onSave={handleUpdateConnection}
         onClose={() => setShowEditModal(false)}
       />
+      {rateLimitsConnection && (
+        <RateLimitsModal
+          key={rateLimitsConnection.id}
+          isOpen={true}
+          title={`Rate Limits — ${rateLimitsConnection.name || rateLimitsConnection.email || rateLimitsConnection.id?.slice(0, 8)}`}
+          limits={rateLimitsConnection.rateLimits}
+          modelOptions={rateLimitModelOptions}
+          onSave={handleUpdateRateLimits}
+          onClose={() => setRateLimitsConnection(null)}
+        />
+      )}
+      {editingGroupLimits && (
+        <RateLimitsModal
+          key={`group-${editingGroupLimits}`}
+          isOpen={true}
+          title={`Rate Limits — group "${editingGroupLimits}" (default)`}
+          limits={groupRateLimits[editingGroupLimits]}
+          modelOptions={rateLimitModelOptions}
+          onSave={(limits) => handleSaveGroupRateLimits(editingGroupLimits, limits)}
+          onClose={() => setEditingGroupLimits(null)}
+        />
+      )}
       {isCompatible && (
         <EditCompatibleNodeModal
           isOpen={showEditNodeModal}

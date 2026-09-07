@@ -6,8 +6,9 @@ const OPTIONAL_FIELDS = [
   "displayName", "email", "globalPriority", "defaultModel",
   "accessToken", "refreshToken", "expiresAt", "tokenType",
   "scope", "projectId", "apiKey", "testStatus",
-  "lastTested", "lastError", "lastErrorAt", "rateLimitedUntil", "expiresIn", "errorCode",
+  "lastTested", "lastError", "lastErrorAt", "lastSuccessAt", "rateLimitedUntil", "expiresIn", "errorCode",
   "consecutiveUseCount", "idToken", "lastRefreshAt",
+  "rateLimits", // per-model { rpm, rpd, tpm, tpd } overrides; rateLimitState is internal-only, set via bumpRateLimitCounters
 ];
 
 function rowToConn(row) {
@@ -221,6 +222,33 @@ export async function updateProviderConnection(id, data) {
     if (data.group !== undefined) merged.group = typeof data.group === "string" ? data.group.trim() : "";
     upsert(db, merged);
     if (data.priority !== undefined) reorderInTx(db, existing.provider);
+    result = merged;
+  });
+  return result;
+}
+
+// Atomic per-model merge of rateLimitState — a plain updateProviderConnection()
+// call would work too, but its {...existing, ...data} merge is shallow, so
+// passing `rateLimitState: {[model]: patch}` would REPLACE the whole map and
+// lose every other model's counters. This reads the row fresh inside the
+// transaction, merges just `patch` into rateLimitState[model], and writes back —
+// concurrent calls for the same connection are safe because the driver's
+// db.transaction() body runs fully synchronously (no await inside it), so two
+// overlapping calls can never interleave their read and write; whichever runs
+// second simply reads the first one's already-committed result (same guarantee
+// usageRepo.saveRequestUsage relies on — see its comment there).
+export async function bumpRateLimitCounters(id, model, patch) {
+  if (!id || !model || !patch) return null;
+  const db = await getAdapter();
+  let result;
+  db.transaction(() => {
+    const row = db.get(`SELECT * FROM providerConnections WHERE id = ?`, [id]);
+    if (!row) { result = null; return; }
+    const existing = rowToConn(row);
+    const state = { ...(existing.rateLimitState || {}) };
+    state[model] = { ...(state[model] || {}), ...patch };
+    const merged = { ...existing, rateLimitState: state, updatedAt: new Date().toISOString() };
+    upsert(db, merged);
     result = merged;
   });
   return result;
