@@ -29,7 +29,7 @@ function toLimitOrUndefined(v) {
 // here; blank = no limit for that field. 9Router proactively skips a key once
 // it's at/over any configured limit (its own, or its group's default), rather
 // than waiting for the provider's own 429.
-export default function RateLimitsModal({ isOpen, title, limits, modelOptions = [], onClose, onSave }) {
+export default function RateLimitsModal({ isOpen, title, limits, modelOptions = [], copyOptions = [], onClose, onSave }) {
   const [draft, setDraft] = useState(() => {
     const d = {};
     for (const [model, l] of Object.entries(limits || {})) {
@@ -87,6 +87,22 @@ export default function RateLimitsModal({ isOpen, title, limits, modelOptions = 
     setDraft((prev) => ({ ...prev, [model]: { ...prev[model], [field]: value } }));
   };
 
+  // Replaces the whole draft with another already-configured source's limits
+  // (e.g. copying one group's defaults into another). A plain replace, not a
+  // merge — predictable, and the source is by definition already valid config.
+  const handleCopyFrom = (source) => {
+    const found = copyOptions.find((o) => o.label === source);
+    if (!found) return;
+    const d = {};
+    for (const [model, l] of Object.entries(found.limits || {})) {
+      d[model] = {
+        rpm: l?.rpm ?? "", rpd: l?.rpd ?? "",
+        tpm: l?.tpm ?? "", tpd: l?.tpd ?? "",
+      };
+    }
+    setDraft(d);
+  };
+
   const handleSave = async () => {
     setSaving(true);
     try {
@@ -113,11 +129,67 @@ export default function RateLimitsModal({ isOpen, title, limits, modelOptions = 
       isOpen={isOpen}
       onClose={onClose}
       title={title || "Rate Limits"}
+      size="xl"
     >
       <div className="flex flex-col gap-4">
         <p className="text-xs text-text-muted">
           Optional per-model caps for this key. Leave a field blank for unlimited.
         </p>
+
+        {copyOptions.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-dashed border-black/10 p-2.5 dark:border-white/10">
+            <span className="material-symbols-outlined text-text-muted text-[16px]">content_copy</span>
+            <span className="text-xs text-text-muted">Copy config from:</span>
+            <div className="flex flex-wrap gap-1.5">
+              {copyOptions.map((o) => (
+                <button
+                  key={o.label}
+                  type="button"
+                  onClick={() => handleCopyFrom(o.label)}
+                  className="rounded-full border border-black/10 px-2.5 py-0.5 text-xs text-text-muted hover:border-primary hover:text-primary dark:border-white/10"
+                  title={`Replace the draft below with ${o.label}'s config`}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Add Model kept at the top (not near the bottom, past the model list)
+            so its dropdown always has room to render without being clipped by
+            the modal body's own overflow-y-auto scroll boundary. */}
+        <div className="flex gap-2">
+          <div className="relative flex-1" ref={pickerRef}>
+            <Input
+              placeholder="Search or type a model id…"
+              value={newModel}
+              onChange={(e) => { setNewModel(e.target.value); setShowSuggestions(true); }}
+              onFocus={() => setShowSuggestions(true)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") { e.preventDefault(); handleAddModel(); }
+                if (e.key === "Escape") setShowSuggestions(false);
+              }}
+            />
+            {showSuggestions && suggestions.length > 0 && (
+              <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-56 overflow-y-auto rounded-lg border border-border bg-bg py-1 shadow-lg">
+                {suggestions.map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => handleAddModel(m)}
+                    className="block w-full truncate px-3 py-1.5 text-left font-mono text-sm text-text-main hover:bg-black/5 dark:hover:bg-white/5"
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <Button onClick={() => handleAddModel()} variant="secondary" disabled={!newModel.trim()}>
+            Add Model
+          </Button>
+        </div>
 
         {models.length === 0 && (
           <div className="text-center py-4 border border-dashed border-black/10 dark:border-white/10 rounded-lg bg-black/[0.01] dark:bg-white/[0.01]">
@@ -158,38 +230,6 @@ export default function RateLimitsModal({ isOpen, title, limits, modelOptions = 
           </div>
         )}
 
-        <div className="flex gap-2">
-          <div className="relative flex-1" ref={pickerRef}>
-            <Input
-              placeholder="Search or type a model id…"
-              value={newModel}
-              onChange={(e) => { setNewModel(e.target.value); setShowSuggestions(true); }}
-              onFocus={() => setShowSuggestions(true)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") { e.preventDefault(); handleAddModel(); }
-                if (e.key === "Escape") setShowSuggestions(false);
-              }}
-            />
-            {showSuggestions && suggestions.length > 0 && (
-              <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-48 overflow-y-auto rounded-lg border border-border bg-bg py-1 shadow-lg">
-                {suggestions.map((m) => (
-                  <button
-                    key={m}
-                    type="button"
-                    onClick={() => handleAddModel(m)}
-                    className="block w-full truncate px-3 py-1.5 text-left font-mono text-sm text-text-main hover:bg-black/5 dark:hover:bg-white/5"
-                  >
-                    {m}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-          <Button onClick={() => handleAddModel()} variant="secondary" disabled={!newModel.trim()}>
-            Add Model
-          </Button>
-        </div>
-
         <div className="flex gap-2 pt-1">
           <Button onClick={handleSave} fullWidth disabled={saving}>{saving ? "Saving..." : "Save"}</Button>
           <Button onClick={onClose} variant="ghost" fullWidth>Cancel</Button>
@@ -204,6 +244,10 @@ RateLimitsModal.propTypes = {
   title: PropTypes.string,
   limits: PropTypes.object,
   modelOptions: PropTypes.arrayOf(PropTypes.string),
+  copyOptions: PropTypes.arrayOf(PropTypes.shape({
+    label: PropTypes.string.isRequired,
+    limits: PropTypes.object,
+  })),
   onClose: PropTypes.func.isRequired,
   onSave: PropTypes.func.isRequired,
 };

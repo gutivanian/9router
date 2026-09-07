@@ -2047,6 +2047,9 @@ export default function ProviderDetailPage() {
           title={`Rate Limits — group "${editingGroupLimits}" (default)`}
           limits={groupRateLimits[editingGroupLimits]}
           modelOptions={rateLimitModelOptions}
+          copyOptions={Object.entries(groupRateLimits)
+            .filter(([g, l]) => g !== editingGroupLimits && l && Object.keys(l).length > 0)
+            .map(([g, l]) => ({ label: g, limits: l }))}
           onSave={(limits) => handleSaveGroupRateLimits(editingGroupLimits, limits)}
           onClose={() => setEditingGroupLimits(null)}
         />
