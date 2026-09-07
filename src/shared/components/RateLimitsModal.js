@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import PropTypes from "prop-types";
 import Modal from "@/shared/components/Modal";
 import Input from "@/shared/components/Input";
@@ -42,14 +42,37 @@ export default function RateLimitsModal({ isOpen, title, limits, modelOptions = 
   });
   const [newModel, setNewModel] = useState("");
   const [saving, setSaving] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const pickerRef = useRef(null);
 
   const models = Object.keys(draft);
 
-  const handleAddModel = () => {
-    const m = newModel.trim();
+  // Native <datalist> is unreliable across browsers (some show nothing at
+  // all) — a plain filtered dropdown, same pattern as the Proxy picker in
+  // ConnectionRow.js, is guaranteed to render.
+  const query = newModel.trim().toLowerCase();
+  const suggestions = modelOptions
+    .filter((m) => !draft[m])
+    .filter((m) => !query || m.toLowerCase().includes(query))
+    .slice(0, 30);
+
+  useEffect(() => {
+    if (!showSuggestions) return;
+    const handler = (e) => {
+      if (pickerRef.current && !pickerRef.current.contains(e.target)) {
+        setShowSuggestions(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showSuggestions]);
+
+  const handleAddModel = (modelOverride) => {
+    const m = (modelOverride ?? newModel).trim();
     if (!m || draft[m]) return;
     setDraft((prev) => ({ ...prev, [m]: emptyEntry() }));
     setNewModel("");
+    setShowSuggestions(false);
   };
 
   const handleRemoveModel = (model) => {
@@ -135,19 +158,34 @@ export default function RateLimitsModal({ isOpen, title, limits, modelOptions = 
           </div>
         )}
 
-        <datalist id="rate-limit-model-options">
-          {modelOptions.filter((m) => !draft[m]).map((m) => <option key={m} value={m} />)}
-        </datalist>
         <div className="flex gap-2">
-          <Input
-            placeholder="Search or type a model id…"
-            value={newModel}
-            onChange={(e) => setNewModel(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleAddModel(); } }}
-            list="rate-limit-model-options"
-            className="flex-1"
-          />
-          <Button onClick={handleAddModel} variant="secondary" disabled={!newModel.trim()}>
+          <div className="relative flex-1" ref={pickerRef}>
+            <Input
+              placeholder="Search or type a model id…"
+              value={newModel}
+              onChange={(e) => { setNewModel(e.target.value); setShowSuggestions(true); }}
+              onFocus={() => setShowSuggestions(true)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") { e.preventDefault(); handleAddModel(); }
+                if (e.key === "Escape") setShowSuggestions(false);
+              }}
+            />
+            {showSuggestions && suggestions.length > 0 && (
+              <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-48 overflow-y-auto rounded-lg border border-border bg-bg py-1 shadow-lg">
+                {suggestions.map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => handleAddModel(m)}
+                    className="block w-full truncate px-3 py-1.5 text-left font-mono text-sm text-text-main hover:bg-black/5 dark:hover:bg-white/5"
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <Button onClick={() => handleAddModel()} variant="secondary" disabled={!newModel.trim()}>
             Add Model
           </Button>
         </div>
