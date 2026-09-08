@@ -16,6 +16,12 @@ const ACCOUNT_STRATEGY_OPTIONS = [
   { value: "adaptive", label: "Adaptive — self-healing, prefers recently-successful accounts" },
 ];
 
+const COMBO_STRATEGY_OPTIONS = [
+  { value: "fallback", label: "Fallback — always start with first model" },
+  { value: "round-robin", label: "Round Robin — cycle through models" },
+  { value: "adaptive", label: "Adaptive — self-healing, prefers healthy models" },
+];
+
 function getLocaleFromCookie() {
   if (typeof document === "undefined") return "en";
   const cookie = document.cookie
@@ -1482,19 +1488,22 @@ export default function ProfilePage() {
               </div>
             )}
 
-            {/* Combo Round Robin */}
+            {/* Combo Strategy */}
             <div className="flex items-start sm:items-center justify-between gap-4 pt-4 border-t border-border/50">
               <div className="flex-1 min-w-0">
-                <p className="font-medium text-sm sm:text-base">Combo Round Robin</p>
+                <p className="font-medium text-sm sm:text-base">Combo Strategy</p>
                 <p className="text-xs sm:text-sm text-text-muted">
-                  Cycle through providers in combos instead of always starting with first
+                  How combos pick which model to try first (default for combos with no per-combo override)
                 </p>
               </div>
-              <Toggle
-                checked={settings.comboStrategy === "round-robin"}
-                onChange={() => updateComboStrategy(settings.comboStrategy === "round-robin" ? "fallback" : "round-robin")}
-                disabled={loading}
-              />
+              <div className="w-full sm:w-[280px] shrink-0">
+                <Select
+                  options={COMBO_STRATEGY_OPTIONS}
+                  value={settings.comboStrategy || "fallback"}
+                  onChange={(e) => updateComboStrategy(e.target.value)}
+                  disabled={loading}
+                />
+              </div>
             </div>
 
             {/* Combo Sticky Round Robin Limit */}
@@ -1526,6 +1535,8 @@ export default function ProfilePage() {
                 : "Currently using accounts in priority order (Fill First)."}
               {settings.comboStrategy === "round-robin"
                 ? ` Combos rotate after ${settings.comboStickyRoundRobinLimit || 1} call${(settings.comboStickyRoundRobinLimit || 1) === 1 ? "" : "s"} per model.`
+                : settings.comboStrategy === "adaptive"
+                ? " Combos prefer whichever model last succeeded more recently than it last errored."
                 : " Combos always start with their first model."}
             </p>
           </div>
