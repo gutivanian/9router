@@ -3,6 +3,7 @@
 import { useState, useMemo, useEffect } from "react";
 import PropTypes from "prop-types";
 import Modal from "./Modal";
+import Button from "./Button";
 import ProviderIcon from "./ProviderIcon";
 import CapacityBadges from "./CapacityBadges";
 import { useModelCaps } from "@/shared/hooks/useModelCaps";
@@ -33,6 +34,7 @@ export default function ModelSelectModal({
   capFilter = null,
   addedModelValues = [],
   closeOnSelect = true,
+  showDoneButtons = false,
 }) {
   // Filter activeProviders by serviceKinds when kindFilter set (e.g. "webSearch", "webFetch")
   const filteredActiveProviders = useMemo(() => {
@@ -467,12 +469,17 @@ export default function ModelSelectModal({
       title={title}
       size="md"
       className="p-4!"
-      footer={null}
+      footer={showDoneButtons ? (
+        <>
+          <Button onClick={onClose} variant="ghost">Cancel</Button>
+          <Button onClick={onClose}>Save</Button>
+        </>
+      ) : null}
     >
       {/* Info bar */}
       <div className="flex items-center gap-2 mb-3 px-2.5 py-2 bg-primary/8 border border-primary/20 rounded-lg text-xs text-text-muted">
         <span className="material-symbols-outlined text-primary shrink-0" style={{ fontSize: "14px" }}>info</span>
-        <span>Click to add, click again to remove. Changes are saved automatically.</span>
+        <span>Click to add, click again to remove.{showDoneButtons ? "" : " Changes are saved automatically."}</span>
       </div>
 
       {/* Search - compact */}
@@ -655,4 +662,5 @@ ModelSelectModal.propTypes = {
   kindFilter: PropTypes.string,
   addedModelValues: PropTypes.arrayOf(PropTypes.string),
   closeOnSelect: PropTypes.bool,
+  showDoneButtons: PropTypes.bool,
 };
