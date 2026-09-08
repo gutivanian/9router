@@ -1096,6 +1096,7 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindF
           kindFilter={kindFilter}
           addedModelValues={models}
           closeOnSelect={false}
+          showDoneButtons
         />
       )}
     </>

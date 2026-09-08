@@ -181,10 +181,12 @@ export default function ProviderDetailPage() {
   const providerStorageAlias = isCompatible ? providerId : providerAlias;
   // Search/dropdown source for the Rate Limits modal's "Add Model" field —
   // every model already known for this provider (registry + any custom ones).
+  // Only active (non-disabled) models -- there's no point rate-limiting a model
+  // the user has already disabled for this provider.
   const rateLimitModelOptions = [...new Set([
     ...models.map((m) => m.id),
     ...customModels.filter((m) => m.providerAlias === providerStorageAlias).map((m) => m.id),
-  ])].sort();
+  ])].filter((id) => !disabledModelIds.includes(id)).sort();
   // Union of levels across this provider's reasoning models — drives the level picker options.
   // Include custom models too (e.g. manually added gpt-5.6-sol → max).
   const providerThinkingLevels = (() => {
