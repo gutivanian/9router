@@ -1143,6 +1143,7 @@ export default function ProviderDetailPage() {
                   setShowEditModal(true);
                 }}
                 onEditRateLimits={() => setRateLimitsConnection(conn)}
+                groupRateLimits={groupRateLimits}
                 onDelete={() => handleDelete(conn.id)}
                 oneByOneStatus={oneByOneResults[conn.id] || null}
               />
@@ -2036,6 +2037,7 @@ export default function ProviderDetailPage() {
           title={`Rate Limits — ${rateLimitsConnection.name || rateLimitsConnection.email || rateLimitsConnection.id?.slice(0, 8)}`}
           limits={rateLimitsConnection.rateLimits}
           modelOptions={rateLimitModelOptions}
+          groupDefaults={groupRateLimits[rateLimitsConnection.group] || {}}
           onSave={handleUpdateRateLimits}
           onClose={() => setRateLimitsConnection(null)}
         />

@@ -23,13 +23,11 @@ function toLimitOrUndefined(v) {
   return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
-// Per-model rate-limit config — for one connection (key) or one group default,
-// depending on the caller (see RateLimitsModal.forConnection/forGroup below).
-// Default is unlimited — a model only gets a cap once explicitly given a number
-// here; blank = no limit for that field. 9Router proactively skips a key once
-// it's at/over any configured limit (its own, or its group's default), rather
-// than waiting for the provider's own 429.
-export default function RateLimitsModal({ isOpen, title, limits, modelOptions = [], copyOptions = [], onClose, onSave }) {
+function fmtLimit(v) {
+  return v === undefined || v === null || v === "" ? "inf" : v;
+}
+
+export default function RateLimitsModal({ isOpen, title, limits, modelOptions = [], copyOptions = [], groupDefaults = {}, onClose, onSave }) {
   const [draft, setDraft] = useState(() => {
     const d = {};
     for (const [model, l] of Object.entries(limits || {})) {
@@ -46,10 +44,8 @@ export default function RateLimitsModal({ isOpen, title, limits, modelOptions = 
   const pickerRef = useRef(null);
 
   const models = Object.keys(draft);
+  const inheritedModels = Object.keys(groupDefaults || {}).filter((m) => !draft[m]);
 
-  // Native <datalist> is unreliable across browsers (some show nothing at
-  // all) — a plain filtered dropdown, same pattern as the Proxy picker in
-  // ConnectionRow.js, is guaranteed to render.
   const query = newModel.trim().toLowerCase();
   const suggestions = modelOptions
     .filter((m) => !draft[m])
@@ -87,9 +83,14 @@ export default function RateLimitsModal({ isOpen, title, limits, modelOptions = 
     setDraft((prev) => ({ ...prev, [model]: { ...prev[model], [field]: value } }));
   };
 
-  // Replaces the whole draft with another already-configured source's limits
-  // (e.g. copying one group's defaults into another). A plain replace, not a
-  // merge — predictable, and the source is by definition already valid config.
+  const handleOverrideInherited = (model) => {
+    const l = groupDefaults[model] || {};
+    setDraft((prev) => ({
+      ...prev,
+      [model]: { rpm: l.rpm ?? "", rpd: l.rpd ?? "", tpm: l.tpm ?? "", tpd: l.tpd ?? "" },
+    }));
+  };
+
   const handleCopyFrom = (source) => {
     const found = copyOptions.find((o) => o.label === source);
     if (!found) return;
@@ -114,8 +115,6 @@ export default function RateLimitsModal({ isOpen, title, limits, modelOptions = 
           tpm: toLimitOrUndefined(limits.tpm),
           tpd: toLimitOrUndefined(limits.tpd),
         };
-        // A model with every field blank is unlimited already — drop it instead
-        // of persisting a no-op entry.
         if (entry.rpm || entry.rpd || entry.tpm || entry.tpd) next[model] = entry;
       }
       await onSave(next);
@@ -147,7 +146,7 @@ export default function RateLimitsModal({ isOpen, title, limits, modelOptions = 
                   type="button"
                   onClick={() => handleCopyFrom(o.label)}
                   className="rounded-full border border-black/10 px-2.5 py-0.5 text-xs text-text-muted hover:border-primary hover:text-primary dark:border-white/10"
-                  title={`Replace the draft below with ${o.label}'s config`}
+                  title={"Replace the draft below with " + o.label + "'s config"}
                 >
                   {o.label}
                 </button>
@@ -156,13 +155,10 @@ export default function RateLimitsModal({ isOpen, title, limits, modelOptions = 
           </div>
         )}
 
-        {/* Add Model kept at the top (not near the bottom, past the model list)
-            so its dropdown always has room to render without being clipped by
-            the modal body's own overflow-y-auto scroll boundary. */}
         <div className="flex gap-2">
           <div className="relative flex-1" ref={pickerRef}>
             <Input
-              placeholder="Search or type a model id…"
+              placeholder="Search or type a model id..."
               value={newModel}
               onChange={(e) => { setNewModel(e.target.value); setShowSuggestions(true); }}
               onFocus={() => setShowSuggestions(true)}
@@ -191,9 +187,32 @@ export default function RateLimitsModal({ isOpen, title, limits, modelOptions = 
           </Button>
         </div>
 
-        {models.length === 0 && (
+        {models.length === 0 && inheritedModels.length === 0 && (
           <div className="text-center py-4 border border-dashed border-black/10 dark:border-white/10 rounded-lg bg-black/[0.01] dark:bg-white/[0.01]">
-            <p className="text-xs text-text-muted">No models configured — unlimited for everything</p>
+            <p className="text-xs text-text-muted">No models configured, unlimited for everything</p>
+          </div>
+        )}
+
+        {inheritedModels.length > 0 && (
+          <div className="flex flex-col gap-2">
+            <p className="text-[11px] uppercase tracking-wide text-text-muted">Inherited from group (already in effect)</p>
+            {inheritedModels.map((model) => {
+              const l = groupDefaults[model] || {};
+              return (
+                <div key={model} className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-dashed border-black/10 p-2.5 text-xs dark:border-white/10">
+                  <code className="font-mono font-medium">{model}</code>
+                  <span className="text-text-muted">RPM {fmtLimit(l.rpm)} - RPD {fmtLimit(l.rpd)} - TPM {fmtLimit(l.tpm)} - TPD {fmtLimit(l.tpd)}</span>
+                  <button
+                    type="button"
+                    onClick={() => handleOverrideInherited(model)}
+                    className="ml-auto rounded-full border border-black/10 px-2 py-0.5 text-text-muted hover:border-primary hover:text-primary dark:border-white/10"
+                    title="Set a value for this key that is different from the group default"
+                  >
+                    Override
+                  </button>
+                </div>
+              );
+            })}
           </div>
         )}
 
@@ -218,7 +237,7 @@ export default function RateLimitsModal({ isOpen, title, limits, modelOptions = 
                       label={f.label}
                       type="number"
                       min="1"
-                      placeholder="∞"
+                      placeholder="unlimited"
                       value={draft[model][f.key]}
                       onChange={(e) => handleFieldChange(model, f.key, e.target.value)}
                       hint={f.hint}
@@ -248,6 +267,7 @@ RateLimitsModal.propTypes = {
     label: PropTypes.string.isRequired,
     limits: PropTypes.object,
   })),
+  groupDefaults: PropTypes.object,
   onClose: PropTypes.func.isRequired,
   onSave: PropTypes.func.isRequired,
 };

@@ -6,7 +6,7 @@ import PropTypes from "prop-types";
 import { Badge, Toggle, Tooltip } from "@/shared/components";
 import CooldownTimer from "./CooldownTimer";
 
-export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst, isLast, onMoveUp, onMoveDown, onToggleActive, onUpdateProxy, onEdit, onEditRateLimits, onDelete, oneByOneStatus = null, autoPing = null }) {
+export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst, isLast, onMoveUp, onMoveDown, onToggleActive, onUpdateProxy, onEdit, onEditRateLimits, groupRateLimits = {}, onDelete, oneByOneStatus = null, autoPing = null }) {
   const [showProxyDropdown, setShowProxyDropdown] = useState(false);
   const [updatingProxy, setUpdatingProxy] = useState(false);
   const proxyDropdownRef = useRef(null);
@@ -69,7 +69,12 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
     }
   };
 
-  const rateLimitCount = Object.keys(connection.rateLimits || {}).length;
+  // Effective count: own overrides + models only covered via the connection's
+  // group default (already in effect via auth.js's resolveRateLimits fallback,
+  // even though nothing is stored on this connection itself).
+  const groupDefaultsForConn = groupRateLimits[(connection.group || "").trim()] || {};
+  const rateLimitModels = new Set([...Object.keys(connection.rateLimits || {}), ...Object.keys(groupDefaultsForConn)]);
+  const rateLimitCount = rateLimitModels.size;
 
   const rowAuthType = connection.authType || (isOAuth ? "oauth" : "apikey");
   const isOAuthConnection = rowAuthType === "oauth";
@@ -325,6 +330,7 @@ ConnectionRow.propTypes = {
   onUpdateProxy: PropTypes.func,
   onEdit: PropTypes.func.isRequired,
   onEditRateLimits: PropTypes.func,
+  groupRateLimits: PropTypes.object,
   onDelete: PropTypes.func.isRequired,
   oneByOneStatus: PropTypes.shape({
     state: PropTypes.string,
