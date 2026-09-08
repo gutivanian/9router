@@ -1,0 +1,1 @@
+globalThis.__RSC_MANIFEST=(globalThis.__RSC_MANIFEST||{});globalThis.__RSC_MANIFEST["/api/providers/[id]/test/route"]={"moduleLoading":{"prefix":"/_next/"},"ssrModuleMapping":{},"edgeSSRModuleMapping":{},"clientModules":{},"entryCSSFiles":{"D:\\Dokumen\\Project\\9router-deploy-wt2\\src\\app\\api\\providers\\[id]\\test\\route":[]},"rscModuleMapping":{},"edgeRscModuleMapping":{}};

@@ -1,0 +1,1 @@
+globalThis.__RSC_MANIFEST=(globalThis.__RSC_MANIFEST||{});globalThis.__RSC_MANIFEST["/api/translator/translate/route"]={"moduleLoading":{"prefix":"/_next/"},"ssrModuleMapping":{},"edgeSSRModuleMapping":{},"clientModules":{},"entryCSSFiles":{"D:\\Dokumen\\Project\\9router-deploy-wt2\\src\\app\\api\\translator\\translate\\route":[]},"rscModuleMapping":{},"edgeRscModuleMapping":{}};

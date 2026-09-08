@@ -1,0 +1,1 @@
+globalThis.__RSC_MANIFEST=(globalThis.__RSC_MANIFEST||{});globalThis.__RSC_MANIFEST["/api/tunnel/disable/route"]={"moduleLoading":{"prefix":"/_next/"},"ssrModuleMapping":{},"edgeSSRModuleMapping":{},"clientModules":{},"entryCSSFiles":{"D:\\Dokumen\\Project\\9router-deploy-wt2\\src\\app\\api\\tunnel\\disable\\route":[]},"rscModuleMapping":{},"edgeRscModuleMapping":{}};
