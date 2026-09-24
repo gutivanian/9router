@@ -95,6 +95,23 @@ export function convertOpenAIContentToParts(content) {
           const data = url.substring(commaIndex + 1);
           parts.push({ inlineData: { mime_type: mimeType, data: data } });
         }
+      } else if ((item.type === "video_url") && item.video_url?.url?.startsWith("data:")) {
+        // Same convention as image_url/audio_url: inline base64 data URI.
+        const url = item.video_url.url;
+        const commaIndex = url.indexOf(",");
+        if (commaIndex !== -1) {
+          const mimePart = url.substring(5, commaIndex);
+          const data = url.substring(commaIndex + 1);
+          const mimeType = mimePart.split(";")[0];
+          parts.push({ inlineData: { mime_type: mimeType, data: data } });
+        }
+      } else if ((item.type === "video_url") && item.video_url?.url && (item.video_url.url.startsWith("http://") || item.video_url.url.startsWith("https://"))) {
+        // Remote URL: Gemini fetches it directly via fileData (same path as image_url above).
+        parts.push({ fileData: { fileUri: item.video_url.url, mimeType: "video/*" } });
+      } else if (item.type === "input_video" && item.input_video?.data) {
+        // Same convention as input_audio: raw base64 + a format hint.
+        const format = item.input_video.format || "mp4";
+        parts.push({ inlineData: { mime_type: `video/${format}`, data: item.input_video.data } });
       }
     }
   }
