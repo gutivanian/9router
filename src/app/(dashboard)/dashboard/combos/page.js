@@ -466,12 +466,59 @@ function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdi
   );
 }
 
+// Request count per connection over a period, summed from /api/usage/stats
+// (byAccount is keyed per model+account, so one key can appear several times).
+// A key with no entry was never used in that period => 0. Cached briefly so
+// several provider fieldsets in one modal share a single request.
+const USAGE_PERIODS = [
+  { value: "today", label: "Today" },
+  { value: "24h", label: "24h" },
+  { value: "7d", label: "7 days" },
+  { value: "30d", label: "30 days" },
+  { value: "all", label: "All time" },
+];
+const usageCountCache = new Map();
+function fetchConnectionUsage(period) {
+  const hit = usageCountCache.get(period);
+  if (hit && Date.now() - hit.at < 30000) return hit.promise;
+  const promise = fetch(`/api/usage/stats?period=${period}`)
+    .then((res) => (res.ok ? res.json() : null))
+    .then((stats) => {
+      if (!stats) return null;
+      const counts = {};
+      for (const e of Object.values(stats.byAccount || {})) {
+        if (!e?.connectionId) continue;
+        counts[e.connectionId] = (counts[e.connectionId] || 0) + (e.requests || 0);
+      }
+      return counts;
+    })
+    .catch(() => null)
+    .then((counts) => {
+      if (!counts) usageCountCache.delete(period); // do not cache failures
+      return counts;
+    });
+  usageCountCache.set(period, { at: Date.now(), promise });
+  return promise;
+}
+
 // One provider's key-restriction fieldset: "All keys" checkbox + group checkboxes +
 // individual-key checkboxes. Shared between the standalone Keys modal (ComboAccountsModal)
 // and the inline Keys step inside ComboFormModal's create/edit flow.
 function ProviderKeysField({ provider, connections, draft, onToggle, onSetAll }) {
   const [keyFilterGroup, setKeyFilterGroup] = useState("");
   const [keySearch, setKeySearch] = useState("");
+  const [usagePeriod, setUsagePeriod] = useState("today");
+  const [usageMode, setUsageMode] = useState("any"); // any | eq | lte | gte
+  const [usageN, setUsageN] = useState("0");
+  const [usageCounts, setUsageCounts] = useState(null); // null = loading / unavailable
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchConnectionUsage(usagePeriod).then((counts) => {
+      if (!cancelled) setUsageCounts(counts);
+    });
+    return () => { cancelled = true; };
+  }, [usagePeriod]);
 
   const conns = connections.filter((c) => c.provider === provider);
   const groups = [...new Set(conns.map((c) => (c.group || "").trim()).filter(Boolean))].sort();
@@ -479,6 +526,17 @@ function ProviderKeysField({ provider, connections, draft, onToggle, onSetAll })
   const d = draft || { groups: new Set(), connectionIds: new Set() };
   const restricted = d.groups.size > 0 || d.connectionIds.size > 0;
   const coveredIds = new Set(conns.filter((c) => d.groups.has((c.group || "").trim())).map((c) => c.id));
+
+  const countOf = (id) => usageCounts?.[id] || 0;
+  const groupUsage = (g) => conns.filter((c) => (c.group || "").trim() === g).reduce((s, c) => s + countOf(c.id), 0);
+  // Inactive while counts are still loading / failed, so a failed fetch can never
+  // make every key look like "0 uses".
+  const matchesUsage = (n) => {
+    if (usageMode === "any" || usageCounts === null) return true;
+    const target = Number(usageN);
+    if (usageN === "" || !Number.isFinite(target)) return true;
+    return usageMode === "eq" ? n === target : usageMode === "lte" ? n <= target : n >= target;
+  };
 
   // Display-only narrowing of the individual-key list; it does not touch
   // selection state, just makes a long list (dozens of keys) searchable.
@@ -490,8 +548,19 @@ function ProviderKeysField({ provider, connections, draft, onToggle, onSetAll })
       const label = `${c.name || ""} ${c.email || ""} ${c.id}`.toLowerCase();
       if (!label.includes(query)) return false;
     }
-    return true;
+    return matchesUsage(countOf(c.id));
   });
+  // Keys the shown list can still add (not already picked directly or via a group).
+  const shownSelectable = visibleConns.filter((c) => !coveredIds.has(c.id));
+  const allShownSelected = shownSelectable.length > 0 && shownSelectable.every((c) => d.connectionIds.has(c.id));
+  const handleSelectShown = () => {
+    // onToggle flips membership, so only touch the keys that need to change.
+    for (const c of shownSelectable) {
+      if (allShownSelected === d.connectionIds.has(c.id)) onToggle("connectionIds", c.id);
+    }
+  };
+  // A selected group always stays visible so it cannot silently vanish from the picker.
+  const visibleGroups = groups.filter((g) => d.groups.has(g) || matchesUsage(groupUsage(g)));
 
   return (
     <div className="rounded-lg border border-black/10 p-3 dark:border-white/10">
@@ -507,12 +576,14 @@ function ProviderKeysField({ provider, connections, draft, onToggle, onSetAll })
         <div className="mb-2">
           <p className="mb-1 text-[11px] uppercase tracking-wide text-text-muted">Groups</p>
           <div className="flex flex-wrap gap-1.5">
-            {groups.map((g) => (
+            {visibleGroups.map((g) => (
               <label key={g} className={`flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs ${d.groups.has(g) ? "border-primary text-primary" : "border-black/10 text-text-muted dark:border-white/10"}`}>
                 <input type="checkbox" className="hidden" checked={d.groups.has(g)} onChange={() => onToggle("groups", g)} />
                 {g} <span className="opacity-60">({conns.filter((c) => (c.group || "").trim() === g).length})</span>
+                {usageCounts && <span className="opacity-60" title="Total requests from this group's keys">· {groupUsage(g)}x</span>}
               </label>
             ))}
+            {visibleGroups.length === 0 && <span className="text-xs italic text-text-muted">No groups match the usage filter.</span>}
           </div>
         </div>
       )}
@@ -543,6 +614,32 @@ function ProviderKeysField({ provider, connections, draft, onToggle, onSetAll })
               className="w-full rounded border border-black/10 bg-transparent py-1 pl-7 pr-2 text-[11px] placeholder-text-muted/70 focus:border-primary/40 focus:outline-none dark:border-white/10"
             />
           </div>
+          <div className="mb-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-text-muted">
+            <span className="material-symbols-outlined text-[14px]">bar_chart</span>
+            <span>Used</span>
+            <select value={usageMode} onChange={(e) => setUsageMode(e.target.value)} className="rounded border border-black/10 bg-transparent px-1.5 py-0.5 dark:border-white/10" title="Filter keys and groups by how many requests they served">
+              <option value="any">any number of times</option>
+              <option value="eq">exactly</option>
+              <option value="lte">at most</option>
+              <option value="gte">at least</option>
+            </select>
+            {usageMode !== "any" && (
+              <>
+                <input type="number" min="0" value={usageN} onChange={(e) => setUsageN(e.target.value)} className="w-14 rounded border border-black/10 bg-transparent px-1.5 py-0.5 dark:border-white/10" />
+                <span>x</span>
+              </>
+            )}
+            <span>in</span>
+            <select value={usagePeriod} onChange={(e) => setUsagePeriod(e.target.value)} className="rounded border border-black/10 bg-transparent px-1.5 py-0.5 dark:border-white/10">
+              {USAGE_PERIODS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+            </select>
+            {usageMode !== "any" && usageCounts === null && <span className="italic">loading usage...</span>}
+            {shownSelectable.length > 0 && (usageMode !== "any" || query || keyFilterGroup) && (
+              <button type="button" onClick={handleSelectShown} className="ml-auto rounded-full border border-black/10 px-2 py-0.5 hover:border-primary hover:text-primary dark:border-white/10">
+                {allShownSelected ? "Deselect" : "Select"} shown ({shownSelectable.length})
+              </button>
+            )}
+          </div>
           <div className="flex max-h-44 flex-col gap-1 overflow-auto">
             {visibleConns.length === 0 && <p className="text-xs italic text-text-muted">No keys match.</p>}
             {visibleConns.map((c) => {
@@ -558,6 +655,7 @@ function ProviderKeysField({ provider, connections, draft, onToggle, onSetAll })
                   <span className="truncate">{c.name || c.email || c.id.slice(0, 8)}</span>
                   {c.group && <span className="rounded bg-black/5 px-1 text-[10px] text-text-muted dark:bg-white/10">{c.group}</span>}
                   {viaGroup && <span className="text-[10px] text-primary">via group</span>}
+                  {usageCounts && <span className="ml-auto shrink-0 text-[10px] text-text-muted">{countOf(c.id)}x</span>}
                 </label>
               );
             })}
