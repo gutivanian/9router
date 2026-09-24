@@ -18,8 +18,9 @@ const VALID_NAME_REGEX = /^[a-zA-Z0-9_.\-]+$/;
 // to the first enabled model here instead of erroring or dropping the data.
 const CAPACITY_ADAPTER_CAPS = [
   { key: "vision", label: "Vision", icon: "visibility", desc: "Images" },
-  // pdf, videoInput temporarily hidden — no translator support yet for those blocks.
+  { key: "pdf", label: "PDF", icon: "picture_as_pdf", desc: "PDF / documents" },
   { key: "audioInput", label: "Audio", icon: "graphic_eq", desc: "Audio input" },
+  { key: "videoInput", label: "Video", icon: "videocam", desc: "Video input" },
 ];
 const DEFAULT_FALLBACK_MODEL = "oc/mimo-v2.5-free";
 const EMPTY_CAP_ENTRY = { enabled: true, roundRobin: false, models: [] };
@@ -325,6 +326,17 @@ function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdi
   const isFusion = current === "fusion";
   const accountFilters = strategy.accountFilters || {};
   const filteredProviderCount = Object.keys(accountFilters).length;
+  // Actual number of keys the restriction resolves to (a single group entry can
+  // cover many keys) -- not just how many providers have a restriction set.
+  const filteredKeyCount = Object.entries(accountFilters).reduce((sum, [provider, f]) => {
+    const conns = activeProviders.filter((c) => c.provider === provider);
+    const groups = new Set((f.groups || []).map((g) => String(g).trim()));
+    const explicitIds = new Set(f.connectionIds || []);
+    const matched = new Set(
+      conns.filter((c) => groups.has((c.group || "").trim()) || explicitIds.has(c.id)).map((c) => c.id)
+    );
+    return sum + matched.size;
+  }, 0);
 
   return (
     <Card padding="sm" className="group">
@@ -395,7 +407,7 @@ function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdi
               title="Restrict which accounts / groups this combo uses"
             >
               <span className="material-symbols-outlined text-[18px]">{filteredProviderCount ? "filter_alt" : "groups"}</span>
-              <span className="text-[10px] leading-tight">{filteredProviderCount ? `Keys (${filteredProviderCount})` : "Keys"}</span>
+              <span className="text-[10px] leading-tight">{filteredProviderCount ? `Keys (${filteredKeyCount})` : "Keys"}</span>
             </button>
             <button
               onClick={(e) => { e.stopPropagation(); onCopy(combo.name, `combo-${combo.id}`); }}
@@ -458,11 +470,28 @@ function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdi
 // individual-key checkboxes. Shared between the standalone Keys modal (ComboAccountsModal)
 // and the inline Keys step inside ComboFormModal's create/edit flow.
 function ProviderKeysField({ provider, connections, draft, onToggle, onSetAll }) {
+  const [keyFilterGroup, setKeyFilterGroup] = useState("");
+  const [keySearch, setKeySearch] = useState("");
+
   const conns = connections.filter((c) => c.provider === provider);
   const groups = [...new Set(conns.map((c) => (c.group || "").trim()).filter(Boolean))].sort();
+  const hasUngrouped = conns.some((c) => !(c.group || "").trim());
   const d = draft || { groups: new Set(), connectionIds: new Set() };
   const restricted = d.groups.size > 0 || d.connectionIds.size > 0;
   const coveredIds = new Set(conns.filter((c) => d.groups.has((c.group || "").trim())).map((c) => c.id));
+
+  // Display-only narrowing of the individual-key list; it does not touch
+  // selection state, just makes a long list (dozens of keys) searchable.
+  const query = keySearch.trim().toLowerCase();
+  const visibleConns = conns.filter((c) => {
+    const g = (c.group || "").trim();
+    if (keyFilterGroup === "__ungrouped__" ? g : keyFilterGroup && g !== keyFilterGroup) return false;
+    if (query) {
+      const label = `${c.name || ""} ${c.email || ""} ${c.id}`.toLowerCase();
+      if (!label.includes(query)) return false;
+    }
+    return true;
+  });
 
   return (
     <div className="rounded-lg border border-black/10 p-3 dark:border-white/10">
@@ -489,9 +518,34 @@ function ProviderKeysField({ provider, connections, draft, onToggle, onSetAll })
       )}
       {conns.length > 0 && (
         <div>
-          <p className="mb-1 text-[11px] uppercase tracking-wide text-text-muted">Individual keys</p>
+          <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+            <p className="text-[11px] uppercase tracking-wide text-text-muted">Individual keys</p>
+            {(groups.length > 0 || hasUngrouped) && (
+              <select
+                value={keyFilterGroup}
+                onChange={(e) => setKeyFilterGroup(e.target.value)}
+                className="ml-auto rounded border border-black/10 bg-transparent px-1.5 py-0.5 text-[11px] text-text-muted dark:border-white/10"
+                title="Filter this list by group"
+              >
+                <option value="">All groups</option>
+                {groups.map((g) => <option key={g} value={g}>{g}</option>)}
+                {hasUngrouped && <option value="__ungrouped__">Ungrouped</option>}
+              </select>
+            )}
+          </div>
+          <div className="relative mb-1.5">
+            <span className="material-symbols-outlined absolute left-2 top-1/2 -translate-y-1/2 text-text-muted text-[14px]">search</span>
+            <input
+              type="text"
+              value={keySearch}
+              onChange={(e) => setKeySearch(e.target.value)}
+              placeholder="Search keys..."
+              className="w-full rounded border border-black/10 bg-transparent py-1 pl-7 pr-2 text-[11px] placeholder-text-muted/70 focus:border-primary/40 focus:outline-none dark:border-white/10"
+            />
+          </div>
           <div className="flex max-h-44 flex-col gap-1 overflow-auto">
-            {conns.map((c) => {
+            {visibleConns.length === 0 && <p className="text-xs italic text-text-muted">No keys match.</p>}
+            {visibleConns.map((c) => {
               const viaGroup = coveredIds.has(c.id);
               return (
                 <label key={c.id} className={`flex items-center gap-2 text-xs ${viaGroup ? "opacity-50" : ""}`}>
@@ -559,7 +613,7 @@ function ComboAccountsModal({ isOpen, combo, connections = [], accountFilters = 
   const handleSave = () => onSave(buildAccountFiltersPayload(providers, draft, connections));
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={`Accounts for "${combo.name}"`}>
+    <Modal isOpen={isOpen} onClose={onClose} title={`Accounts for "${combo.name}"`} size="xl">
       <div className="flex flex-col gap-4">
         <p className="text-xs text-text-muted">
           Pick which keys each provider in this combo may use. Leave a provider untouched to use <span className="font-medium text-text-main">all</span> its keys. A checked group includes every key in it.
@@ -976,6 +1030,7 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindF
         isOpen={isOpen}
         onClose={onClose}
         title={isEdit ? "Edit Combo" : "Create Combo"}
+        size="xl"
       >
         <div className="flex flex-col gap-3">
           {/* Name */}
