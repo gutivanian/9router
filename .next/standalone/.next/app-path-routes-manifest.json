@@ -129,8 +129,8 @@
   "/api/oauth/kiro/import-cli-proxy/route": "/api/oauth/kiro/import-cli-proxy",
   "/api/provider-nodes/route": "/api/provider-nodes",
   "/api/providers/[id]/route": "/api/providers/[id]",
-  "/api/providers/[id]/models/route": "/api/providers/[id]/models",
   "/api/providers/client/route": "/api/providers/client",
+  "/api/providers/[id]/models/route": "/api/providers/[id]/models",
   "/api/providers/suggested-models/route": "/api/providers/suggested-models",
   "/api/providers/route": "/api/providers",
   "/api/proxy-pools/[id]/route": "/api/proxy-pools/[id]",
@@ -182,8 +182,8 @@
   "/(dashboard)/dashboard/translator/page": "/dashboard/translator",
   "/(dashboard)/dashboard/usage/page": "/dashboard/usage",
   "/(dashboard)/dashboard/console-log/page": "/dashboard/console-log",
-  "/(dashboard)/dashboard/proxy-pools/page": "/dashboard/proxy-pools",
-  "/(dashboard)/dashboard/profile/page": "/dashboard/profile",
   "/(dashboard)/dashboard/providers/page": "/dashboard/providers",
+  "/(dashboard)/dashboard/profile/page": "/dashboard/profile",
+  "/(dashboard)/dashboard/proxy-pools/page": "/dashboard/proxy-pools",
   "/(dashboard)/dashboard/providers/[id]/page": "/dashboard/providers/[id]"
 }
