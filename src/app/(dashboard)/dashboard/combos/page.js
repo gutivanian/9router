@@ -52,6 +52,7 @@ export default function CombosPage() {
   const [editingCombo, setEditingCombo] = useState(null);
   const [activeProviders, setActiveProviders] = useState([]);
   const [comboStrategies, setComboStrategies] = useState({});
+  const keyUsageFor = (excludeName) => countKeyComboUsage(combos, comboStrategies, activeProviders, excludeName);
   const [capacityAdapter, setCapacityAdapter] = useState(EMPTY_CAPACITY_ADAPTER);
   const { getCaps } = useModelCaps();
   const [confirmState, setConfirmState] = useState(null);
@@ -261,6 +262,7 @@ export default function CombosPage() {
               onEdit={() => setEditingCombo(combo)}
               onDelete={() => handleDelete(combo.id)}
               strategy={comboStrategies[combo.name] || {}}
+              comboUsage={keyUsageFor(combo.name)}
               onSetStrategy={(patch) => handleSetComboStrategy(combo.name, patch)}
             />
           ))}
@@ -283,6 +285,7 @@ export default function CombosPage() {
           onClose={() => setShowCreateModal(false)}
           onSave={handleCreate}
           activeProviders={activeProviders}
+          keyComboUsage={keyUsageFor(null)}
         />
       )}
 
@@ -295,6 +298,7 @@ export default function CombosPage() {
           onSave={(data) => handleUpdate(editingCombo.id, data)}
           activeProviders={activeProviders}
           initialAccountFilters={comboStrategies[editingCombo.name]?.accountFilters || {}}
+          keyComboUsage={keyUsageFor(editingCombo.name)}
         />
       )}
 
@@ -318,7 +322,7 @@ const STRATEGY_OPTIONS = [
   { value: "fusion", label: "Fusion — panel + judge" },
 ];
 
-function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdit, onDelete, strategy = {}, onSetStrategy }) {
+function ComboCard({ comboUsage = {}, combo, getCaps, activeProviders = [], copied, onCopy, onEdit, onDelete, strategy = {}, onSetStrategy }) {
   const [showJudgeSelect, setShowJudgeSelect] = useState(false);
   const [showAccounts, setShowAccounts] = useState(false);
   const current = strategy.fallbackStrategy || "fallback";
@@ -458,6 +462,7 @@ function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdi
           combo={combo}
           connections={activeProviders}
           accountFilters={accountFilters}
+          comboUsage={comboUsage}
           onClose={() => setShowAccounts(false)}
           onSave={(next) => { onSetStrategy({ accountFilters: next }); setShowAccounts(false); }}
         />
@@ -466,59 +471,37 @@ function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdi
   );
 }
 
-// Request count per connection over a period, summed from /api/usage/stats
-// (byAccount is keyed per model+account, so one key can appear several times).
-// A key with no entry was never used in that period => 0. Cached briefly so
-// several provider fieldsets in one modal share a single request.
-const USAGE_PERIODS = [
-  { value: "today", label: "Today" },
-  { value: "24h", label: "24h" },
-  { value: "7d", label: "7 days" },
-  { value: "30d", label: "30 days" },
-  { value: "all", label: "All time" },
-];
-const usageCountCache = new Map();
-function fetchConnectionUsage(period) {
-  const hit = usageCountCache.get(period);
-  if (hit && Date.now() - hit.at < 30000) return hit.promise;
-  const promise = fetch(`/api/usage/stats?period=${period}`)
-    .then((res) => (res.ok ? res.json() : null))
-    .then((stats) => {
-      if (!stats) return null;
-      const counts = {};
-      for (const e of Object.values(stats.byAccount || {})) {
-        if (!e?.connectionId) continue;
-        counts[e.connectionId] = (counts[e.connectionId] || 0) + (e.requests || 0);
+// How many combos each key is explicitly assigned to (directly or via a group
+// in that combo's Keys filter). Combos with no filter for a provider (= "all keys")
+// are not counted, so 0 means "not assigned to any combo". The combo being edited
+// is excluded via excludeName so the number reads as "in OTHER combos".
+function countKeyComboUsage(combos, comboStrategies, connections, excludeName) {
+  const counts = {};
+  for (const combo of combos) {
+    if (combo.name === excludeName) continue;
+    const filters = comboStrategies[combo.name]?.accountFilters || {};
+    const seen = new Set();
+    for (const [provider, f] of Object.entries(filters)) {
+      const groups = new Set((f.groups || []).map((g) => String(g).trim()));
+      const ids = new Set(f.connectionIds || []);
+      for (const c of connections) {
+        if (c.provider !== provider) continue;
+        if (groups.has((c.group || "").trim()) || ids.has(c.id)) seen.add(c.id);
       }
-      return counts;
-    })
-    .catch(() => null)
-    .then((counts) => {
-      if (!counts) usageCountCache.delete(period); // do not cache failures
-      return counts;
-    });
-  usageCountCache.set(period, { at: Date.now(), promise });
-  return promise;
+    }
+    for (const id of seen) counts[id] = (counts[id] || 0) + 1;
+  }
+  return counts;
 }
 
 // One provider's key-restriction fieldset: "All keys" checkbox + group checkboxes +
 // individual-key checkboxes. Shared between the standalone Keys modal (ComboAccountsModal)
 // and the inline Keys step inside ComboFormModal's create/edit flow.
-function ProviderKeysField({ provider, connections, draft, onToggle, onSetAll }) {
+function ProviderKeysField({ provider, connections, draft, onToggle, onSetAll, comboUsage = {} }) {
   const [keyFilterGroup, setKeyFilterGroup] = useState("");
   const [keySearch, setKeySearch] = useState("");
-  const [usagePeriod, setUsagePeriod] = useState("today");
   const [usageMode, setUsageMode] = useState("any"); // any | eq | lte | gte
   const [usageN, setUsageN] = useState("0");
-  const [usageCounts, setUsageCounts] = useState(null); // null = loading / unavailable
-
-  useEffect(() => {
-    let cancelled = false;
-    fetchConnectionUsage(usagePeriod).then((counts) => {
-      if (!cancelled) setUsageCounts(counts);
-    });
-    return () => { cancelled = true; };
-  }, [usagePeriod]);
 
   const conns = connections.filter((c) => c.provider === provider);
   const groups = [...new Set(conns.map((c) => (c.group || "").trim()).filter(Boolean))].sort();
@@ -527,12 +510,10 @@ function ProviderKeysField({ provider, connections, draft, onToggle, onSetAll })
   const restricted = d.groups.size > 0 || d.connectionIds.size > 0;
   const coveredIds = new Set(conns.filter((c) => d.groups.has((c.group || "").trim())).map((c) => c.id));
 
-  const countOf = (id) => usageCounts?.[id] || 0;
+  const countOf = (id) => comboUsage[id] || 0;
   const groupUsage = (g) => conns.filter((c) => (c.group || "").trim() === g).reduce((s, c) => s + countOf(c.id), 0);
-  // Inactive while counts are still loading / failed, so a failed fetch can never
-  // make every key look like "0 uses".
   const matchesUsage = (n) => {
-    if (usageMode === "any" || usageCounts === null) return true;
+    if (usageMode === "any") return true;
     const target = Number(usageN);
     if (usageN === "" || !Number.isFinite(target)) return true;
     return usageMode === "eq" ? n === target : usageMode === "lte" ? n <= target : n >= target;
@@ -580,7 +561,7 @@ function ProviderKeysField({ provider, connections, draft, onToggle, onSetAll })
               <label key={g} className={`flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs ${d.groups.has(g) ? "border-primary text-primary" : "border-black/10 text-text-muted dark:border-white/10"}`}>
                 <input type="checkbox" className="hidden" checked={d.groups.has(g)} onChange={() => onToggle("groups", g)} />
                 {g} <span className="opacity-60">({conns.filter((c) => (c.group || "").trim() === g).length})</span>
-                {usageCounts && <span className="opacity-60" title="Total requests from this group's keys">· {groupUsage(g)}x</span>}
+                <span className="opacity-60" title="Total combo assignments across this group's keys">· {groupUsage(g)}x</span>
               </label>
             ))}
             {visibleGroups.length === 0 && <span className="text-xs italic text-text-muted">No groups match the usage filter.</span>}
@@ -616,8 +597,8 @@ function ProviderKeysField({ provider, connections, draft, onToggle, onSetAll })
           </div>
           <div className="mb-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-text-muted">
             <span className="material-symbols-outlined text-[14px]">bar_chart</span>
-            <span>Used</span>
-            <select value={usageMode} onChange={(e) => setUsageMode(e.target.value)} className="rounded border border-black/10 bg-transparent px-1.5 py-0.5 dark:border-white/10" title="Filter keys and groups by how many requests they served">
+            <span>Used in</span>
+            <select value={usageMode} onChange={(e) => setUsageMode(e.target.value)} className="rounded border border-black/10 bg-transparent px-1.5 py-0.5 dark:border-white/10" title="Filter keys by how many other combos they are assigned to">
               <option value="any">any number of times</option>
               <option value="eq">exactly</option>
               <option value="lte">at most</option>
@@ -629,11 +610,7 @@ function ProviderKeysField({ provider, connections, draft, onToggle, onSetAll })
                 <span>x</span>
               </>
             )}
-            <span>in</span>
-            <select value={usagePeriod} onChange={(e) => setUsagePeriod(e.target.value)} className="rounded border border-black/10 bg-transparent px-1.5 py-0.5 dark:border-white/10">
-              {USAGE_PERIODS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
-            </select>
-            {usageMode !== "any" && usageCounts === null && <span className="italic">loading usage...</span>}
+            <span>combos</span>
             {shownSelectable.length > 0 && (usageMode !== "any" || query || keyFilterGroup) && (
               <button type="button" onClick={handleSelectShown} className="ml-auto rounded-full border border-black/10 px-2 py-0.5 hover:border-primary hover:text-primary dark:border-white/10">
                 {allShownSelected ? "Deselect" : "Select"} shown ({shownSelectable.length})
@@ -655,7 +632,7 @@ function ProviderKeysField({ provider, connections, draft, onToggle, onSetAll })
                   <span className="truncate">{c.name || c.email || c.id.slice(0, 8)}</span>
                   {c.group && <span className="rounded bg-black/5 px-1 text-[10px] text-text-muted dark:bg-white/10">{c.group}</span>}
                   {viaGroup && <span className="text-[10px] text-primary">via group</span>}
-                  {usageCounts && <span className="ml-auto shrink-0 text-[10px] text-text-muted">{countOf(c.id)}x</span>}
+                  <span className="ml-auto shrink-0 text-[10px] text-text-muted" title="Assigned to this many other combos">{countOf(c.id)} combo</span>
                 </label>
               );
             })}
@@ -683,7 +660,7 @@ function buildAccountFiltersPayload(providers, draft, connections) {
 
 // Standalone "Keys" modal, opened from the combo card for a quick edit without
 // reopening the full Create/Edit Combo form.
-function ComboAccountsModal({ isOpen, combo, connections = [], accountFilters = {}, onClose, onSave }) {
+function ComboAccountsModal({ isOpen, combo, connections = [], accountFilters = {}, comboUsage = {}, onClose, onSave }) {
   const providers = [...new Set((combo.models || []).map((m) => (m.includes("/") ? m.slice(0, m.indexOf("/")) : m)))];
 
   const [draft, setDraft] = useState(() => {
@@ -724,6 +701,7 @@ function ComboAccountsModal({ isOpen, combo, connections = [], accountFilters = 
             draft={draft[p]}
             onToggle={(kind, value) => toggle(p, kind, value)}
             onSetAll={() => setAll(p)}
+            comboUsage={comboUsage}
           />
         ))}
         <div className="flex gap-2">
@@ -987,7 +965,7 @@ function ModelItem({ id, index, model, isFirst, isLast, onEdit, onMoveUp, onMove
   );
 }
 
-function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindFilter = null, initialAccountFilters = {} }) {
+function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindFilter = null, initialAccountFilters = {}, keyComboUsage = {} }) {
   // Initialize state with combo values - key prop on parent handles reset on remount
   const [name, setName] = useState(combo?.name || "");
   const [models, setModels] = useState(combo?.models || []);
@@ -1212,6 +1190,7 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindF
                       draft={accountDraft[p]}
                       onToggle={(kind, value) => toggleAccount(p, kind, value)}
                       onSetAll={() => setAllAccounts(p)}
+                      comboUsage={keyComboUsage}
                     />
                   ))}
                 </div>
