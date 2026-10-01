@@ -87,6 +87,33 @@ export function isRateLimitBlocked(connection, model, groupRateLimits) {
 }
 
 /**
+ * Effective { count, limit } for each of a (connection, model) pair's four
+ * counters, for display only (e.g. a "10/15" usage bar in the UI). A metric
+ * with no configured limit comes back null — the caller renders that as
+ * "unlimited" rather than a bar. An elapsed window reads as already reset to
+ * 0, matching overLimit()'s treatment of stale data: the stored count only
+ * actually rolls over on the next real bump, but showing the stale number
+ * would read as "still over" for a window that's actually long since reset.
+ * Returns null entirely if the model has no limits configured at all.
+ */
+export function getRateLimitUsage(connection, model, groupRateLimits) {
+  const limits = resolveRateLimits(connection, model, groupRateLimits);
+  if (!limits) return null;
+  const state = connection?.rateLimitState?.[model] || {};
+  const metric = (windowStart, count, windowMs, limit) => {
+    if (!limit) return null;
+    const elapsed = windowStart ? Date.now() - new Date(windowStart).getTime() : Infinity;
+    return { count: elapsed >= windowMs ? 0 : (count || 0), limit };
+  };
+  return {
+    rpm: metric(state.rpmWindowStart, state.rpmCount, MINUTE_MS, limits.rpm),
+    rpd: metric(state.rpdWindowStart, state.rpdCount, DAY_MS, limits.rpd),
+    tpm: metric(state.tpmWindowStart, state.tpmCount, MINUTE_MS, limits.tpm),
+    tpd: metric(state.tpdWindowStart, state.tpdCount, DAY_MS, limits.tpd),
+  };
+}
+
+/**
  * Next rateLimitState[model] fields after one more request is about to be sent.
  * Call right when a connection is chosen, before dispatch (RPM/RPD only — token
  * count for THIS request isn't known yet). Returns null if neither RPM nor RPD

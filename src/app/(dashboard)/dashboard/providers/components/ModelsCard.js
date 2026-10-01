@@ -77,7 +77,17 @@ function AddCustomModelModal({ isOpen, onSave, onClose }) {
   };
 
   return (
-    <Modal isOpen={isOpen} title="Add Custom Model" onClose={onClose}>
+    <Modal
+      isOpen={isOpen}
+      title="Add Custom Model"
+      onClose={onClose}
+      footer={
+        <>
+          <Button onClick={onClose} variant="ghost" fullWidth>Cancel</Button>
+          <Button onClick={handleSave} fullWidth disabled={!modelId.trim()}>Add</Button>
+        </>
+      }
+    >
       <div className="flex flex-col gap-4">
         <div>
           <label className="text-xs text-text-muted mb-1 block">Model ID</label>
@@ -89,10 +99,6 @@ function AddCustomModelModal({ isOpen, onSave, onClose }) {
             placeholder="e.g. tts-1-hd"
             autoFocus
           />
-        </div>
-        <div className="flex gap-2">
-          <Button onClick={handleSave} fullWidth disabled={!modelId.trim()}>Add</Button>
-          <Button onClick={onClose} variant="ghost" fullWidth>Cancel</Button>
         </div>
       </div>
     </Modal>

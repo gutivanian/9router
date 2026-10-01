@@ -680,7 +680,34 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
       : placeholderUrl;
 
   return (
-    <Modal isOpen={isOpen} title={modalTitle} onClose={handleClose} size="lg">
+    <Modal
+      isOpen={isOpen}
+      title={modalTitle}
+      onClose={handleClose}
+      size="lg"
+      footer={
+        PROXY_OAUTH_PROVIDERS.has(provider) && authMode === "browser" && step === "input" ? (
+          <>
+            <Button onClick={handleClose} variant="ghost" fullWidth>Cancel</Button>
+            <Button onClick={handleManualSubmit} fullWidth disabled={!callbackUrl}>Connect</Button>
+          </>
+        ) : PROXY_OAUTH_PROVIDERS.has(provider) && authMode === "paste-token" && (step === "waiting" || step === "input" || step === "error") ? (
+          <>
+            <Button onClick={handleClose} variant="ghost" fullWidth>Cancel</Button>
+            <Button onClick={handleManualSubmit} fullWidth disabled={!pasteToken}>Connect</Button>
+          </>
+        ) : (step === "waiting" || step === "input") && !isDeviceCode && !PROXY_OAUTH_PROVIDERS.has(provider) ? (
+          <>
+            <Button onClick={handleClose} variant="ghost" fullWidth>
+              Cancel
+            </Button>
+            <Button onClick={handleManualSubmit} fullWidth disabled={!callbackUrl}>
+              Connect
+            </Button>
+          </>
+        ) : null
+      }
+    >
       <div className="flex flex-col gap-4">
         {/* Trae/Windsurf: browser OAuth (proxy) + paste-token fallback */}
         {PROXY_OAUTH_PROVIDERS.has(provider) && (step === "waiting" || step === "input" || step === "error") && (
@@ -721,10 +748,6 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
                       placeholder="http://127.0.0.1:.../callback?..."
                       className="font-mono text-xs"
                     />
-                    <div className="flex gap-2">
-                      <Button onClick={handleManualSubmit} fullWidth disabled={!callbackUrl}>Connect</Button>
-                      <Button onClick={handleClose} variant="ghost" fullWidth>Cancel</Button>
-                    </div>
                   </div>
                 )}
               </>
@@ -747,10 +770,6 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
                   placeholder={PASTE_TOKEN_PROVIDERS[provider].placeholder}
                   className="font-mono text-xs"
                 />
-                <div className="flex gap-2">
-                  <Button onClick={handleManualSubmit} fullWidth disabled={!pasteToken}>Connect</Button>
-                  <Button onClick={handleClose} variant="ghost" fullWidth>Cancel</Button>
-                </div>
               </div>
             )}
           </>
@@ -808,15 +827,6 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
                   className="font-mono text-xs"
                 />
               </div>
-            </div>
-
-            <div className="flex gap-2">
-              <Button onClick={handleManualSubmit} fullWidth disabled={!callbackUrl}>
-                Connect
-              </Button>
-              <Button onClick={handleClose} variant="ghost" fullWidth>
-                Cancel
-              </Button>
             </div>
           </>
         )}

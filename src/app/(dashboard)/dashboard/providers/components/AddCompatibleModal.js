@@ -134,7 +134,30 @@ function AddCompatibleModal({ variant, isOpen, onClose, onCreated }) {
   };
 
   return (
-    <Modal isOpen={isOpen} title={config.title} onClose={onClose}>
+    <Modal
+      isOpen={isOpen}
+      title={config.title}
+      onClose={onClose}
+      footer={
+        <>
+          <Button onClick={onClose} variant="ghost" fullWidth>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleSubmit}
+            fullWidth
+            disabled={
+              !formData.name.trim() ||
+              !formData.prefix.trim() ||
+              !formData.baseUrl.trim() ||
+              submitting
+            }
+          >
+            {submitting ? "Creating..." : "Create"}
+          </Button>
+        </>
+      }
+    >
       <div className="flex flex-col gap-4">
         <Input
           label="Name"
@@ -188,23 +211,6 @@ function AddCompatibleModal({ variant, isOpen, onClose, onCreated }) {
             {validating ? "Checking..." : "Check"}
           </Button>
           {renderValidationResult()}
-        </div>
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <Button
-            onClick={handleSubmit}
-            fullWidth
-            disabled={
-              !formData.name.trim() ||
-              !formData.prefix.trim() ||
-              !formData.baseUrl.trim() ||
-              submitting
-            }
-          >
-            {submitting ? "Creating..." : "Create"}
-          </Button>
-          <Button onClick={onClose} variant="ghost" fullWidth>
-            Cancel
-          </Button>
         </div>
       </div>
     </Modal>

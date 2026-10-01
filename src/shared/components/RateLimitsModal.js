@@ -27,7 +27,7 @@ function fmtLimit(v) {
   return v === undefined || v === null || v === "" ? "inf" : v;
 }
 
-export default function RateLimitsModal({ isOpen, title, limits, modelOptions = [], copyOptions = [], groupDefaults = {}, onClose, onSave }) {
+export default function RateLimitsModal({ isOpen, title, limits, modelOptions = [], copyOptions = [], copyTargets = [], groupDefaults = {}, onClose, onSave, onCopyTo }) {
   const [draft, setDraft] = useState(() => {
     const d = {};
     for (const [model, l] of Object.entries(limits || {})) {
@@ -42,6 +42,8 @@ export default function RateLimitsModal({ isOpen, title, limits, modelOptions = 
   const [saving, setSaving] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const pickerRef = useRef(null);
+  const [copyToTargets, setCopyToTargets] = useState(() => new Set());
+  const [copyingTo, setCopyingTo] = useState(false);
 
   const models = Object.keys(draft);
   const inheritedModels = Object.keys(groupDefaults || {}).filter((m) => !draft[m]);
@@ -104,22 +106,49 @@ export default function RateLimitsModal({ isOpen, title, limits, modelOptions = 
     setDraft(d);
   };
 
+  // Shared by Save and "Copy to" — the draft's in-progress string values, turned
+  // into the persisted { rpm, rpd, tpm, tpd } shape (entries with nothing set drop
+  // out entirely rather than saving as an all-unlimited no-op).
+  const draftToLimits = (d) => {
+    const next = {};
+    for (const [model, l] of Object.entries(d)) {
+      const entry = {
+        rpm: toLimitOrUndefined(l.rpm),
+        rpd: toLimitOrUndefined(l.rpd),
+        tpm: toLimitOrUndefined(l.tpm),
+        tpd: toLimitOrUndefined(l.tpd),
+      };
+      if (entry.rpm || entry.rpd || entry.tpm || entry.tpd) next[model] = entry;
+    }
+    return next;
+  };
+
   const handleSave = async () => {
     setSaving(true);
     try {
-      const next = {};
-      for (const [model, limits] of Object.entries(draft)) {
-        const entry = {
-          rpm: toLimitOrUndefined(limits.rpm),
-          rpd: toLimitOrUndefined(limits.rpd),
-          tpm: toLimitOrUndefined(limits.tpm),
-          tpd: toLimitOrUndefined(limits.tpd),
-        };
-        if (entry.rpm || entry.rpd || entry.tpm || entry.tpd) next[model] = entry;
-      }
-      await onSave(next);
+      await onSave(draftToLimits(draft));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const toggleCopyToTarget = (g) => {
+    setCopyToTargets((prev) => {
+      const next = new Set(prev);
+      next.has(g) ? next.delete(g) : next.add(g);
+      return next;
+    });
+  };
+  const allCopyToSelected = copyTargets.length > 0 && copyTargets.every((g) => copyToTargets.has(g));
+
+  const handleCopyTo = async () => {
+    if (copyToTargets.size === 0) return;
+    setCopyingTo(true);
+    try {
+      await onCopyTo([...copyToTargets], draftToLimits(draft));
+      setCopyToTargets(new Set());
+    } finally {
+      setCopyingTo(false);
     }
   };
 
@@ -129,6 +158,12 @@ export default function RateLimitsModal({ isOpen, title, limits, modelOptions = 
       onClose={onClose}
       title={title || "Rate Limits"}
       size="xl"
+      footer={
+        <>
+          <Button onClick={onClose} variant="ghost" fullWidth>Cancel</Button>
+          <Button onClick={handleSave} fullWidth disabled={saving}>{saving ? "Saving..." : "Save"}</Button>
+        </>
+      }
     >
       <div className="flex flex-col gap-4">
         <p className="text-xs text-text-muted">
@@ -152,6 +187,36 @@ export default function RateLimitsModal({ isOpen, title, limits, modelOptions = 
                 </button>
               ))}
             </div>
+          </div>
+        )}
+
+        {copyTargets.length > 0 && onCopyTo && (
+          <div className="flex flex-col gap-2 rounded-lg border border-dashed border-black/10 p-2.5 dark:border-white/10">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="material-symbols-outlined text-text-muted text-[16px]">ios_share</span>
+              <span className="text-xs text-text-muted">Copy this config to other groups:</span>
+              <button
+                type="button"
+                onClick={() => setCopyToTargets(allCopyToSelected ? new Set() : new Set(copyTargets))}
+                className="ml-auto text-xs text-text-muted hover:text-primary"
+              >
+                {allCopyToSelected ? "Deselect all" : "Select all"}
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {copyTargets.map((g) => (
+                <label
+                  key={g}
+                  className={`flex cursor-pointer items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs ${copyToTargets.has(g) ? "border-primary text-primary" : "border-black/10 text-text-muted dark:border-white/10"}`}
+                >
+                  <input type="checkbox" className="hidden" checked={copyToTargets.has(g)} onChange={() => toggleCopyToTarget(g)} />
+                  {g}
+                </label>
+              ))}
+            </div>
+            <Button onClick={handleCopyTo} variant="secondary" size="sm" disabled={copyingTo || copyToTargets.size === 0}>
+              {copyingTo ? "Copying..." : `Copy to ${copyToTargets.size || ""} group${copyToTargets.size === 1 ? "" : "s"}`}
+            </Button>
           </div>
         )}
 
@@ -248,11 +313,6 @@ export default function RateLimitsModal({ isOpen, title, limits, modelOptions = 
             ))}
           </div>
         )}
-
-        <div className="flex gap-2 pt-1">
-          <Button onClick={handleSave} fullWidth disabled={saving}>{saving ? "Saving..." : "Save"}</Button>
-          <Button onClick={onClose} variant="ghost" fullWidth>Cancel</Button>
-        </div>
       </div>
     </Modal>
   );
@@ -267,7 +327,9 @@ RateLimitsModal.propTypes = {
     label: PropTypes.string.isRequired,
     limits: PropTypes.object,
   })),
+  copyTargets: PropTypes.arrayOf(PropTypes.string),
   groupDefaults: PropTypes.object,
   onClose: PropTypes.func.isRequired,
   onSave: PropTypes.func.isRequired,
+  onCopyTo: PropTypes.func,
 };

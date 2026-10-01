@@ -200,7 +200,30 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
   if (!provider) return null;
 
   return (
-    <Modal isOpen={isOpen} title={`Add ${providerName || provider} ${credentialLabel}`} onClose={onClose}>
+    <Modal
+      isOpen={isOpen}
+      title={`Add ${providerName || provider} ${credentialLabel}`}
+      onClose={onClose}
+      footer={
+        mode === "bulk" ? (
+          <>
+            <Button onClick={onClose} variant="ghost" fullWidth>Cancel</Button>
+            <Button onClick={handleBulkSubmit} fullWidth disabled={saving || !bulkText.trim()}>
+              {saving ? "Adding..." : "Add All Keys"}
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button onClick={onClose} variant="ghost" fullWidth>
+              Cancel
+            </Button>
+            <Button onClick={handleSubmit} fullWidth disabled={saving || (!isOllamaLocal && (!formData.name || !formData.apiKey)) || (isCompatible && !formData.defaultModel.trim()) || (isAzure && (!azureData.azureEndpoint || !azureData.deployment || !azureData.organization)) || (isCloudflareAi && !cloudflareData.accountId)}>
+              {saving ? "Saving..." : "Save"}
+            </Button>
+          </>
+        )
+      }
+    >
       <div className="flex flex-col gap-4">
         <datalist id={GROUP_DATALIST_ID}>
           {existingGroups.map((g) => <option key={g} value={g} />)}
@@ -247,12 +270,6 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
                 {bulkResult.failed > 0 ? ` · ✗ ${bulkResult.failed} failed` : ""}
               </div>
             )}
-            <div className="flex gap-2">
-              <Button onClick={handleBulkSubmit} fullWidth disabled={saving || !bulkText.trim()}>
-                {saving ? "Adding..." : "Add All Keys"}
-              </Button>
-              <Button onClick={onClose} variant="ghost" fullWidth>Cancel</Button>
-            </div>
           </div>
         )}
 
@@ -430,14 +447,6 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
           Legacy manual proxy fields are still accepted by API for backward compatibility.
         </p>
 
-        <div className="flex gap-2">
-          <Button onClick={handleSubmit} fullWidth disabled={saving || (!isOllamaLocal && (!formData.name || !formData.apiKey)) || (isCompatible && !formData.defaultModel.trim()) || (isAzure && (!azureData.azureEndpoint || !azureData.deployment || !azureData.organization)) || (isCloudflareAi && !cloudflareData.accountId)}>
-            {saving ? "Saving..." : "Save"}
-          </Button>
-          <Button onClick={onClose} variant="ghost" fullWidth>
-            Cancel
-          </Button>
-        </div>
         </>)}
       </div>
     </Modal>

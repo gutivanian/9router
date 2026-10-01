@@ -89,7 +89,27 @@ export default function CursorAuthModal({ isOpen, onSuccess, onClose }) {
   };
 
   return (
-    <Modal isOpen={isOpen} title="Connect Cursor IDE" onClose={onClose}>
+    <Modal
+      isOpen={isOpen}
+      title="Connect Cursor IDE"
+      onClose={onClose}
+      footer={
+        !autoDetecting && (
+          <>
+            <Button onClick={onClose} variant="ghost" fullWidth>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleImportToken}
+              fullWidth
+              disabled={importing || !accessToken.trim() || !machineId.trim()}
+            >
+              {importing ? "Importing..." : "Import Token"}
+            </Button>
+          </>
+        )
+      }
+    >
       <div className="flex flex-col gap-4">
         {/* Auto-detecting state */}
         {autoDetecting && (
@@ -184,20 +204,6 @@ export default function CursorAuthModal({ isOpen, onSuccess, onClose }) {
                 <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
               </div>
             )}
-
-            {/* Action Buttons */}
-            <div className="flex gap-2">
-              <Button
-                onClick={handleImportToken}
-                fullWidth
-                disabled={importing || !accessToken.trim() || !machineId.trim()}
-              >
-                {importing ? "Importing..." : "Import Token"}
-              </Button>
-              <Button onClick={onClose} variant="ghost" fullWidth>
-                Cancel
-              </Button>
-            </div>
           </>
         )}
       </div>

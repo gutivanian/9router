@@ -97,7 +97,33 @@ export default function GitLabAuthModal({ isOpen, providerInfo, onSuccess, onClo
   }
 
   return (
-    <Modal isOpen={isOpen} title="Connect GitLab Duo" onClose={handleClose} size="lg">
+    <Modal
+      isOpen={isOpen}
+      title="Connect GitLab Duo"
+      onClose={handleClose}
+      size="lg"
+      footer={
+        mode === "oauth" ? (
+          <>
+            <Button onClick={() => { setMode(null); setError(null); }} variant="ghost" fullWidth>
+              Back
+            </Button>
+            <Button onClick={handleOAuthStart} fullWidth disabled={!clientId.trim()}>
+              Authorize
+            </Button>
+          </>
+        ) : mode === "pat" ? (
+          <>
+            <Button onClick={() => { setMode(null); setError(null); }} variant="ghost" fullWidth>
+              Back
+            </Button>
+            <Button onClick={handlePATSubmit} fullWidth disabled={!pat.trim() || loading} loading={loading}>
+              Connect
+            </Button>
+          </>
+        ) : null
+      }
+    >
       <div className="flex flex-col gap-4">
         {/* Mode selection */}
         {!mode && (
@@ -145,14 +171,6 @@ export default function GitLabAuthModal({ isOpen, providerInfo, onSuccess, onClo
             <Input label="Client ID" value={clientId} onChange={(e) => setClientId(e.target.value)} placeholder="Your OAuth application client ID" />
             <Input label="Client Secret (optional for PKCE)" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} placeholder="Leave empty for public PKCE app" />
             {error && <p className="text-sm text-red-500">{error}</p>}
-            <div className="flex gap-2">
-              <Button onClick={handleOAuthStart} fullWidth disabled={!clientId.trim()}>
-                Authorize
-              </Button>
-              <Button onClick={() => { setMode(null); setError(null); }} variant="ghost" fullWidth>
-                Back
-              </Button>
-            </div>
           </>
         )}
 
@@ -171,14 +189,6 @@ export default function GitLabAuthModal({ isOpen, providerInfo, onSuccess, onClo
             <Input label="GitLab Base URL" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder={GITLAB_COM} />
             <Input label="Personal Access Token" value={pat} onChange={(e) => setPat(e.target.value)} placeholder="glpat-xxxxxxxxxxxxxxxxxxxx" type="password" />
             {error && <p className="text-sm text-red-500">{error}</p>}
-            <div className="flex gap-2">
-              <Button onClick={handlePATSubmit} fullWidth disabled={!pat.trim() || loading} loading={loading}>
-                Connect
-              </Button>
-              <Button onClick={() => { setMode(null); setError(null); }} variant="ghost" fullWidth>
-                Back
-              </Button>
-            </div>
           </>
         )}
       </div>

@@ -502,6 +502,7 @@ function ProviderKeysField({ provider, connections, draft, onToggle, onSetAll, c
   const [keySearch, setKeySearch] = useState("");
   const [usageMode, setUsageMode] = useState("any"); // any | eq | lte | gte
   const [usageN, setUsageN] = useState("0");
+  const [usageSort, setUsageSort] = useState("none"); // none | asc | desc
 
   const conns = connections.filter((c) => c.provider === provider);
   const groups = [...new Set(conns.map((c) => (c.group || "").trim()).filter(Boolean))].sort();
@@ -531,6 +532,11 @@ function ProviderKeysField({ provider, connections, draft, onToggle, onSetAll, c
     }
     return matchesUsage(countOf(c.id));
   });
+  // Sorting is display-only too — it reorders the shown list, never the
+  // underlying priority order the combo actually uses.
+  if (usageSort !== "none") {
+    visibleConns.sort((a, b) => (usageSort === "asc" ? countOf(a.id) - countOf(b.id) : countOf(b.id) - countOf(a.id)));
+  }
   // Keys the shown list can still add (not already picked directly or via a group).
   const shownSelectable = visibleConns.filter((c) => !coveredIds.has(c.id));
   const allShownSelected = shownSelectable.length > 0 && shownSelectable.every((c) => d.connectionIds.has(c.id));
@@ -611,11 +617,24 @@ function ProviderKeysField({ provider, connections, draft, onToggle, onSetAll, c
               </>
             )}
             <span>combos</span>
-            {shownSelectable.length > 0 && (usageMode !== "any" || query || keyFilterGroup) && (
-              <button type="button" onClick={handleSelectShown} className="ml-auto rounded-full border border-black/10 px-2 py-0.5 hover:border-primary hover:text-primary dark:border-white/10">
-                {allShownSelected ? "Deselect" : "Select"} shown ({shownSelectable.length})
+            <div className="ml-auto flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setUsageSort((s) => (s === "desc" ? "asc" : s === "asc" ? "none" : "desc"))}
+                className={`flex items-center gap-0.5 rounded-full border px-2 py-0.5 ${usageSort !== "none" ? "border-primary text-primary" : "border-black/10 hover:border-primary hover:text-primary dark:border-white/10"}`}
+                title="Sort keys by usage"
+              >
+                <span className="material-symbols-outlined text-[14px]">
+                  {usageSort === "asc" ? "arrow_upward" : usageSort === "desc" ? "arrow_downward" : "swap_vert"}
+                </span>
+                Sort by usage
               </button>
-            )}
+              {shownSelectable.length > 0 && (usageMode !== "any" || query || keyFilterGroup) && (
+                <button type="button" onClick={handleSelectShown} className="rounded-full border border-black/10 px-2 py-0.5 hover:border-primary hover:text-primary dark:border-white/10">
+                  {allShownSelected ? "Deselect" : "Select"} shown ({shownSelectable.length})
+                </button>
+              )}
+            </div>
           </div>
           <div className="flex max-h-44 flex-col gap-1 overflow-auto">
             {visibleConns.length === 0 && <p className="text-xs italic text-text-muted">No keys match.</p>}
@@ -688,7 +707,18 @@ function ComboAccountsModal({ isOpen, combo, connections = [], accountFilters = 
   const handleSave = () => onSave(buildAccountFiltersPayload(providers, draft, connections));
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={`Accounts for "${combo.name}"`} size="xl">
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title={`Accounts for "${combo.name}"`}
+      size="xl"
+      footer={
+        <>
+          <Button onClick={onClose} variant="ghost" fullWidth>Cancel</Button>
+          <Button onClick={handleSave} fullWidth>Save</Button>
+        </>
+      }
+    >
       <div className="flex flex-col gap-4">
         <p className="text-xs text-text-muted">
           Pick which keys each provider in this combo may use. Leave a provider untouched to use <span className="font-medium text-text-main">all</span> its keys. A checked group includes every key in it.
@@ -704,10 +734,6 @@ function ComboAccountsModal({ isOpen, combo, connections = [], accountFilters = 
             comboUsage={comboUsage}
           />
         ))}
-        <div className="flex gap-2">
-          <Button onClick={handleSave} fullWidth>Save</Button>
-          <Button onClick={onClose} variant="ghost" fullWidth>Cancel</Button>
-        </div>
       </div>
     </Modal>
   );
@@ -1107,6 +1133,21 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindF
         onClose={onClose}
         title={isEdit ? "Edit Combo" : "Create Combo"}
         size="xl"
+        footer={
+          <>
+            <Button onClick={onClose} variant="ghost" fullWidth size="sm">
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSave}
+              fullWidth
+              size="sm"
+              disabled={!name.trim() || !!nameError || saving}
+            >
+              {saving ? "Saving..." : isEdit ? "Save" : "Create"}
+            </Button>
+          </>
+        }
       >
         <div className="flex flex-col gap-3">
           {/* Name */}
@@ -1197,21 +1238,6 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindF
               )}
             </div>
           )}
-
-          {/* Actions */}
-          <div className="flex flex-col gap-2 pt-1 sm:flex-row">
-            <Button onClick={onClose} variant="ghost" fullWidth size="sm">
-              Cancel
-            </Button>
-            <Button
-              onClick={handleSave}
-              fullWidth
-              size="sm"
-              disabled={!name.trim() || !!nameError || saving}
-            >
-              {saving ? "Saving..." : isEdit ? "Save" : "Create"}
-            </Button>
-          </div>
         </div>
       </Modal>
 
