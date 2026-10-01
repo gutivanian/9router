@@ -183,7 +183,51 @@ export default function KiroAuthModal({ isOpen, onMethodSelect, onClose }) {
   };
 
   return (
-    <Modal isOpen={isOpen} title="Connect Kiro" onClose={onClose} size="lg">
+    <Modal
+      isOpen={isOpen}
+      title="Connect Kiro"
+      onClose={onClose}
+      size="lg"
+      footer={
+        selectedMethod === "idc" ? (
+          <>
+            <Button onClick={handleBack} variant="ghost" fullWidth>Back</Button>
+            <Button onClick={handleIdcContinue} fullWidth>Continue</Button>
+          </>
+        ) : selectedMethod === "api-key" ? (
+          <>
+            <Button onClick={handleBack} variant="ghost" fullWidth>Back</Button>
+            <Button onClick={handleApiKeyImport} fullWidth disabled={importing || !apiKey.trim()}>
+              {importing ? "Validating..." : "Add API Key"}
+            </Button>
+          </>
+        ) : selectedMethod === "social-google" ? (
+          <>
+            <Button onClick={handleBack} variant="ghost" fullWidth>Back</Button>
+            <Button onClick={() => handleSocialLogin("google")} fullWidth>Continue with Google</Button>
+          </>
+        ) : selectedMethod === "social-github" ? (
+          <>
+            <Button onClick={handleBack} variant="ghost" fullWidth>Back</Button>
+            <Button onClick={() => handleSocialLogin("github")} fullWidth>Continue with GitHub</Button>
+          </>
+        ) : selectedMethod === "import" && !autoDetecting ? (
+          <>
+            <Button onClick={handleBack} variant="ghost" fullWidth>Back</Button>
+            <Button onClick={handleImportToken} fullWidth disabled={importing || !refreshToken.trim()}>
+              {importing ? "Importing..." : "Import Token"}
+            </Button>
+          </>
+        ) : selectedMethod === "import-cli-proxy" ? (
+          <>
+            <Button onClick={handleBack} variant="ghost" fullWidth>Back</Button>
+            <Button onClick={handleImportCliProxyJson} fullWidth disabled={importing || !cliProxyJson.trim()}>
+              {importing ? "Importing..." : "Import CLIProxyAPI JSON"}
+            </Button>
+          </>
+        ) : null
+      }
+    >
       <div className="flex flex-col gap-4">
         {/* Method Selection */}
         {!selectedMethod && (
@@ -342,15 +386,6 @@ export default function KiroAuthModal({ isOpen, onMethodSelect, onClose }) {
             {error && (
               <p className="text-sm text-red-600">{error}</p>
             )}
-
-            <div className="flex gap-2">
-              <Button onClick={handleIdcContinue} fullWidth>
-                Continue
-              </Button>
-              <Button onClick={handleBack} variant="ghost" fullWidth>
-                Back
-              </Button>
-            </div>
           </div>
         )}
 
@@ -400,14 +435,6 @@ export default function KiroAuthModal({ isOpen, onMethodSelect, onClose }) {
               </div>
             )}
 
-            <div className="flex gap-2">
-              <Button onClick={handleApiKeyImport} fullWidth disabled={importing || !apiKey.trim()}>
-                {importing ? "Validating..." : "Add API Key"}
-              </Button>
-              <Button onClick={handleBack} variant="ghost" fullWidth>
-                Back
-              </Button>
-            </div>
           </div>
         )}
 
@@ -428,14 +455,6 @@ export default function KiroAuthModal({ isOpen, onMethodSelect, onClose }) {
               </div>
             </div>
 
-            <div className="flex gap-2">
-              <Button onClick={() => handleSocialLogin("google")} fullWidth>
-                Continue with Google
-              </Button>
-              <Button onClick={handleBack} variant="ghost" fullWidth>
-                Back
-              </Button>
-            </div>
           </div>
         )}
 
@@ -456,14 +475,6 @@ export default function KiroAuthModal({ isOpen, onMethodSelect, onClose }) {
               </div>
             </div>
 
-            <div className="flex gap-2">
-              <Button onClick={() => handleSocialLogin("github")} fullWidth>
-                Continue with GitHub
-              </Button>
-              <Button onClick={handleBack} variant="ghost" fullWidth>
-                Back
-              </Button>
-            </div>
           </div>
         )}
 
@@ -529,15 +540,6 @@ export default function KiroAuthModal({ isOpen, onMethodSelect, onClose }) {
                     <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
                   </div>
                 )}
-
-                <div className="flex gap-2">
-                  <Button onClick={handleImportToken} fullWidth disabled={importing || !refreshToken.trim()}>
-                    {importing ? "Importing..." : "Import Token"}
-                  </Button>
-                  <Button onClick={handleBack} variant="ghost" fullWidth>
-                    Back
-                  </Button>
-                </div>
               </>
             )}
           </div>
@@ -573,14 +575,6 @@ export default function KiroAuthModal({ isOpen, onMethodSelect, onClose }) {
               </div>
             )}
 
-            <div className="flex gap-2">
-              <Button onClick={handleImportCliProxyJson} fullWidth disabled={importing || !cliProxyJson.trim()}>
-                {importing ? "Importing..." : "Import CLIProxyAPI JSON"}
-              </Button>
-              <Button onClick={handleBack} variant="ghost" fullWidth>
-                Back
-              </Button>
-            </div>
           </div>
         )}
       </div>

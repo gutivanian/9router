@@ -71,6 +71,7 @@ export default function ProviderDetailPage() {
   const [groupValue, setGroupValue] = useState("");
   const [groupUpdating, setGroupUpdating] = useState(false);
   const [connFilter, setConnFilter] = useState("");
+  const [connGroupFilter, setConnGroupFilter] = useState(""); // "" = all groups, "__ungrouped__" = no group
   const [providerStrategy, setProviderStrategy] = useState(null);
   const [providerStickyLimit, setProviderStickyLimit] = useState("");
   const [thinkingMode, setThinkingMode] = useState("auto");
@@ -905,6 +906,30 @@ export default function ProviderDetailPage() {
     }
   };
 
+  // Applies one { model: {rpm,rpd,tpm,tpd} } config as the default rate limits for
+  // several groups at once — used by both RateLimitsModal's "copy from" source
+  // (group-to-group) and its own draft (key-to-group, from the per-key modal).
+  const handleApplyRateLimitsToGroups = async (targetGroups, limitsObj) => {
+    if (!limitsObj || targetGroups.length === 0) return;
+    try {
+      const res = await fetch("/api/settings");
+      const settingsData = res.ok ? await res.json() : {};
+      const allGroupRateLimits = settingsData.groupRateLimits || {};
+      const providerGroups = { ...(allGroupRateLimits[providerId] || {}) };
+      for (const g of targetGroups) providerGroups[g] = structuredClone(limitsObj);
+      const updated = { ...allGroupRateLimits, [providerId]: providerGroups };
+
+      const patchRes = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ groupRateLimits: updated }),
+      });
+      if (patchRes.ok) setGroupRateLimits(providerGroups);
+    } catch (error) {
+      console.log("Error copying rate limits to groups:", error);
+    }
+  };
+
   const handleUpdateConnectionStatus = async (id, isActive) => {
     try {
       const res = await fetch(`/api/providers/${id}`, {
@@ -948,13 +973,18 @@ export default function ProviderDetailPage() {
   const selectedConnections = connections.filter((conn) => selectedConnectionIds.includes(conn.id));
   const connectionGroups = [...new Set(connections.map((c) => (c.group || "").trim()).filter(Boolean))].sort();
 
-  const connFilterActive = connFilter.trim().length > 0;
+  const connFilterActive = connFilter.trim().length > 0 || connGroupFilter.length > 0;
   const visibleConnections = (() => {
     if (!connFilterActive) return connections;
     const q = connFilter.trim().toLowerCase();
     return connections.filter((c) => {
-      const hay = [c.name, c.email, c.displayName, c.group].filter(Boolean).join(" ").toLowerCase();
-      return hay.includes(q);
+      const g = (c.group || "").trim();
+      if (connGroupFilter === "__ungrouped__" ? g : connGroupFilter && g !== connGroupFilter) return false;
+      if (q) {
+        const hay = [c.name, c.email, c.displayName, c.group].filter(Boolean).join(" ").toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
     });
   })();
   const visibleIds = visibleConnections.map((c) => c.id);
@@ -1755,25 +1785,28 @@ export default function ProviderDetailPage() {
                   {connFilterActive && (
                     <span className="text-xs text-text-muted">{visibleConnections.length} of {connections.length}</span>
                   )}
-                  {connectionGroups.map((g) => (
-                    <div key={g} className="flex items-center gap-0.5">
-                      <button
-                        type="button"
-                        onClick={() => setConnFilter(connFilter.trim() === g ? "" : g)}
-                        className={`rounded-full border px-2 py-0.5 text-xs ${connFilter.trim() === g ? "border-primary text-primary" : "border-black/10 text-text-muted hover:text-primary dark:border-white/10"}`}
-                      >
-                        {g}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setEditingGroupLimits(g)}
-                        className={`rounded-full p-1 transition-colors hover:bg-black/5 dark:hover:bg-white/5 ${groupRateLimits[g] ? "text-primary" : "text-text-muted hover:text-primary"}`}
-                        title={`Default rate limits for group "${g}"`}
-                      >
-                        <span className="material-symbols-outlined text-[14px]">speed</span>
-                      </button>
-                    </div>
-                  ))}
+                  {(connectionGroups.length > 0 || connections.some((c) => !(c.group || "").trim())) && (
+                    <select
+                      value={connGroupFilter}
+                      onChange={(e) => setConnGroupFilter(e.target.value)}
+                      className={`rounded-full border px-2 py-0.5 text-xs ${connGroupFilter ? "border-primary text-primary" : "border-black/10 text-text-muted dark:border-white/10"}`}
+                      title="Filter connections by group"
+                    >
+                      <option value="">All groups</option>
+                      {connectionGroups.map((g) => <option key={g} value={g}>{g}</option>)}
+                      {connections.some((c) => !(c.group || "").trim()) && <option value="__ungrouped__">Ungrouped</option>}
+                    </select>
+                  )}
+                  {connGroupFilter && connGroupFilter !== "__ungrouped__" && (
+                    <button
+                      type="button"
+                      onClick={() => setEditingGroupLimits(connGroupFilter)}
+                      className={`rounded-full p-1 transition-colors hover:bg-black/5 dark:hover:bg-white/5 ${groupRateLimits[connGroupFilter] ? "text-primary" : "text-text-muted hover:text-primary"}`}
+                      title={`Default rate limits for group "${connGroupFilter}"`}
+                    >
+                      <span className="material-symbols-outlined text-[14px]">speed</span>
+                    </button>
+                  )}
                 </div>
               )}
               {connections.length > 0 && (
@@ -2040,6 +2073,8 @@ export default function ProviderDetailPage() {
           limits={rateLimitsConnection.rateLimits}
           modelOptions={rateLimitModelOptions}
           groupDefaults={groupRateLimits[rateLimitsConnection.group] || {}}
+          copyTargets={connectionGroups}
+          onCopyTo={handleApplyRateLimitsToGroups}
           onSave={handleUpdateRateLimits}
           onClose={() => setRateLimitsConnection(null)}
         />
@@ -2054,6 +2089,8 @@ export default function ProviderDetailPage() {
           copyOptions={Object.entries(groupRateLimits)
             .filter(([g, l]) => g !== editingGroupLimits && l && Object.keys(l).length > 0)
             .map(([g, l]) => ({ label: g, limits: l }))}
+          copyTargets={connectionGroups.filter((g) => g !== editingGroupLimits)}
+          onCopyTo={handleApplyRateLimitsToGroups}
           onSave={(limits) => handleSaveGroupRateLimits(editingGroupLimits, limits)}
           onClose={() => setEditingGroupLimits(null)}
         />

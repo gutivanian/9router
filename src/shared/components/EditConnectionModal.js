@@ -181,7 +181,17 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
   if (!connection) return null;
 
   return (
-    <Modal isOpen={isOpen} title="Edit Connection" onClose={onClose}>
+    <Modal
+      isOpen={isOpen}
+      title="Edit Connection"
+      onClose={onClose}
+      footer={
+        <>
+          <Button onClick={onClose} variant="ghost" fullWidth>Cancel</Button>
+          <Button onClick={handleSubmit} fullWidth disabled={saving}>{saving ? "Saving..." : "Save"}</Button>
+        </>
+      }
+    >
       <div className="flex flex-col gap-4">
         <Input
           label="Name"
@@ -285,11 +295,6 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
             )}
           </div>
         )}
-
-        <div className="flex gap-2">
-          <Button onClick={handleSubmit} fullWidth disabled={saving}>{saving ? "Saving..." : "Save"}</Button>
-          <Button onClick={onClose} variant="ghost" fullWidth>Cancel</Button>
-        </div>
       </div>
     </Modal>
   );

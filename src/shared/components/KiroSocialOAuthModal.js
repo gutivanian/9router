@@ -107,7 +107,24 @@ export default function KiroSocialOAuthModal({ isOpen, provider, onSuccess, onCl
   const providerName = provider === "google" ? "Google" : "GitHub";
 
   return (
-    <Modal isOpen={isOpen} title={`Connect Kiro via ${providerName}`} onClose={onClose} size="lg">
+    <Modal
+      isOpen={isOpen}
+      title={`Connect Kiro via ${providerName}`}
+      onClose={onClose}
+      size="lg"
+      footer={
+        step === "input" && (
+          <>
+            <Button onClick={onClose} variant="ghost" fullWidth>
+              Cancel
+            </Button>
+            <Button onClick={handleManualSubmit} fullWidth disabled={!callbackUrl}>
+              Connect
+            </Button>
+          </>
+        )
+      }
+    >
       <div className="flex flex-col gap-4">
         {/* Loading */}
         {step === "loading" && (
@@ -154,15 +171,6 @@ export default function KiroSocialOAuthModal({ isOpen, provider, onSuccess, onCl
                   className="font-mono text-xs"
                 />
               </div>
-            </div>
-
-            <div className="flex gap-2">
-              <Button onClick={handleManualSubmit} fullWidth disabled={!callbackUrl}>
-                Connect
-              </Button>
-              <Button onClick={onClose} variant="ghost" fullWidth>
-                Cancel
-              </Button>
             </div>
           </>
         )}
