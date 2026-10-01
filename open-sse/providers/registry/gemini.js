@@ -19,6 +19,10 @@ export default {
   authType: "apikey",
   authModes: ["apikey"],
   mediaPriority: 1,
+  // Default daily reset for the RPD/TPD rate-limit tracker (src/lib/rateLimits.js)
+  // — Gemini's free-tier quota resets at midnight Pacific. Overridable per
+  // provider via settings.providerResetSchedule.
+  quotaReset: { timezone: "America/Los_Angeles", hour: 0 },
   transport: {
     baseUrl: "https://generativelanguage.googleapis.com/v1beta/models",
     format: "gemini",

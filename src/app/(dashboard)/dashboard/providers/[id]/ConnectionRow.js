@@ -3,28 +3,10 @@
 import { useState, useEffect, useRef } from "react";
 import { getStatusVariant as getConnectionStatusVariant } from "@/shared/utils/connectionStatus";
 import PropTypes from "prop-types";
-import { Badge, Toggle, Tooltip } from "@/shared/components";
-import { getRateLimitUsage } from "@/lib/rateLimits";
+import { Badge, Toggle, Tooltip, RateLimitUsageTable } from "@/shared/components";
 import CooldownTimer from "./CooldownTimer";
 
-// One RPM/RPD/TPM/TPD cell in the usage table: "count/limit" + a small bar,
-// or "∞" for a metric this model has no configured limit for.
-function UsageCell({ usage }) {
-  if (!usage) return <span className="text-text-muted/40">∞</span>;
-  const ratio = usage.limit ? usage.count / usage.limit : 0;
-  const pct = Math.min(100, Math.round(ratio * 100));
-  const barColor = ratio >= 1 ? "bg-red-500" : ratio >= 0.8 ? "bg-amber-500" : "bg-primary";
-  return (
-    <div className="flex min-w-[52px] flex-col gap-0.5">
-      <span className={ratio >= 1 ? "font-medium text-red-500" : "text-text-main"}>{usage.count}/{usage.limit}</span>
-      <div className="h-1 w-full overflow-hidden rounded-full bg-black/10 dark:bg-white/10">
-        <div className={`h-full rounded-full ${barColor}`} style={{ width: `${pct}%` }} />
-      </div>
-    </div>
-  );
-}
-
-export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst, isLast, onMoveUp, onMoveDown, onToggleActive, onUpdateProxy, onEdit, onEditRateLimits, groupRateLimits = {}, onDelete, oneByOneStatus = null, autoPing = null }) {
+export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst, isLast, onMoveUp, onMoveDown, onToggleActive, onUpdateProxy, onEdit, onEditRateLimits, groupRateLimits = {}, resetSchedule = null, onDelete, oneByOneStatus = null, autoPing = null }) {
   const [showProxyDropdown, setShowProxyDropdown] = useState(false);
   const [updatingProxy, setUpdatingProxy] = useState(false);
   const proxyDropdownRef = useRef(null);
@@ -159,8 +141,6 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
     if (oneByOneStatus.state === "failed") return oneByOneStatus.error ? `failed: ${oneByOneStatus.error}` : "failed";
     return null;
   };
-
-  const sortedRateLimitModels = [...rateLimitModels].sort();
 
   return (
     <div className={`group flex min-w-0 flex-col gap-3 rounded-lg p-2 transition-colors hover:bg-black/[0.02] dark:hover:bg-white/[0.02] ${connection.isActive === false ? "opacity-60" : ""}`}>
@@ -317,36 +297,7 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
         />
       </div>
     </div>
-    {sortedRateLimitModels.length > 0 && (
-      <div className="w-full overflow-x-auto rounded-lg border border-black/10 dark:border-white/10">
-        <table className="w-full min-w-[420px] text-xs">
-          <thead>
-            <tr className="border-b border-black/10 text-left text-text-muted dark:border-white/10">
-              <th className="px-2 py-1 font-normal">Model</th>
-              <th className="px-2 py-1 font-normal">RPM</th>
-              <th className="px-2 py-1 font-normal">RPD</th>
-              <th className="px-2 py-1 font-normal">TPM</th>
-              <th className="px-2 py-1 font-normal">TPD</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sortedRateLimitModels.map((model) => {
-              const usage = getRateLimitUsage(connection, model, groupRateLimits);
-              if (!usage) return null;
-              return (
-                <tr key={model} className="border-b border-black/[0.04] last:border-0 dark:border-white/[0.04]">
-                  <td className="max-w-[200px] truncate px-2 py-1 font-mono" title={model}>{model}</td>
-                  <td className="px-2 py-1"><UsageCell usage={usage.rpm} /></td>
-                  <td className="px-2 py-1"><UsageCell usage={usage.rpd} /></td>
-                  <td className="px-2 py-1"><UsageCell usage={usage.tpm} /></td>
-                  <td className="px-2 py-1"><UsageCell usage={usage.tpd} /></td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    )}
+    <RateLimitUsageTable connection={connection} groupRateLimits={groupRateLimits} resetSchedule={resetSchedule} />
     </div>
   );
 }
@@ -383,6 +334,7 @@ ConnectionRow.propTypes = {
   onEdit: PropTypes.func.isRequired,
   onEditRateLimits: PropTypes.func,
   groupRateLimits: PropTypes.object,
+  resetSchedule: PropTypes.shape({ timezone: PropTypes.string, hour: PropTypes.number }),
   onDelete: PropTypes.func.isRequired,
   oneByOneStatus: PropTypes.shape({
     state: PropTypes.string,

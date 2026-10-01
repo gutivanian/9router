@@ -163,3 +163,23 @@ export const USAGE_SUPPORTED_PROVIDERS = REGISTRY
 export const USAGE_APIKEY_PROVIDERS = REGISTRY
   .filter(r => r.features?.usageApikey)
   .map(r => r.id);
+
+// Each provider's default daily reset time for the RPD/TPD rate-limit tracker
+// (src/lib/rateLimits.js) — { timezone, hour } for providers whose quota is
+// known to reset at a fixed wall-clock time rather than rolling 24h. A
+// provider with no entry here falls back to rolling, unless the user sets
+// settings.providerResetSchedule[providerId] themselves (that always wins).
+export const PROVIDER_QUOTA_RESET_DEFAULTS = REGISTRY.reduce((acc, r) => {
+  if (r.quotaReset?.timezone) acc[r.id] = r.quotaReset;
+  return acc;
+}, {});
+
+// The { timezone, hour } to pass as rateLimits.js's `resetSchedule` for one
+// provider: the user's own settings.providerResetSchedule[providerId] override
+// if they set one, else that provider's registry default, else null (rolling
+// 24h — see src/lib/rateLimits.js).
+export function resolveProviderResetSchedule(providerId, providerResetSchedule) {
+  const override = providerResetSchedule?.[providerId];
+  if (override?.timezone) return override;
+  return PROVIDER_QUOTA_RESET_DEFAULTS[providerId] || null;
+}
