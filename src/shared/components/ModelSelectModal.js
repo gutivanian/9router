@@ -52,6 +52,7 @@ export default function ModelSelectModal({
   const [customModels, setCustomModels] = useState([]);
   const [disabledModels, setDisabledModels] = useState({});
   const [cursorModels, setCursorModels] = useState([]);
+  const [collapsedProviders, setCollapsedProviders] = useState(() => new Set());
 
   // Cursor exposes the usable catalog per account. Keep the static catalog only
   // as a fallback, since it quickly becomes stale and different accounts can
@@ -443,6 +444,14 @@ export default function ModelSelectModal({
     return filtered;
   }, [groupedModels, searchQuery, addedModelValues]);
 
+  const toggleProviderCollapsed = (providerId) => {
+    setCollapsedProviders((prev) => {
+      const next = new Set(prev);
+      next.has(providerId) ? next.delete(providerId) : next.add(providerId);
+      return next;
+    });
+  };
+
   const handleSelect = (model) => {
     const value = model?.value || model?.name || model;
     const isAdded = addedModelValues.includes(value);
@@ -467,8 +476,8 @@ export default function ModelSelectModal({
         setSearchQuery("");
       }}
       title={title}
-      size="md"
-      className="p-4!"
+      size="full"
+      className="max-w-6xl p-4!"
       footer={showDoneButtons ? (
         <>
           <Button onClick={onClose} variant="ghost">Cancel</Button>
@@ -499,7 +508,8 @@ export default function ModelSelectModal({
       </div>
 
       {/* Models grouped by provider - compact */}
-      <div className="max-h-[400px] overflow-y-auto space-y-3">
+      {/* One scroll only: the Modal body scrolls, so this list just flows inside it. */}
+      <div className="space-y-3">
         {/* Combos section - always first */}
         {filteredCombos.length > 0 && (
           <div>
@@ -546,19 +556,29 @@ export default function ModelSelectModal({
           <div key={providerId}>
             {/* Provider header */}
             <div className="flex items-center gap-1.5 mb-1.5 sticky top-0 bg-surface py-0.5">
-              <ProviderIcon
-                src={`/providers/${providerId}.png`}
-                alt={group.name}
-                size={14}
-                fallbackText={(group.name || providerId).slice(0, 2).toUpperCase()}
-                fallbackColor={group.color}
-              />
-              <span className="text-xs font-medium text-primary">
-                {group.name}
-              </span>
-              <span className="text-[10px] text-text-muted">
-                ({group.models.length})
-              </span>
+              <button
+                type="button"
+                onClick={() => toggleProviderCollapsed(providerId)}
+                className="flex items-center gap-1.5 min-w-0 hover:opacity-80"
+                aria-expanded={!collapsedProviders.has(providerId)}
+              >
+                <span className="material-symbols-outlined text-text-muted text-[14px] transition-transform" style={{ transform: collapsedProviders.has(providerId) ? "rotate(-90deg)" : "none" }}>
+                  expand_more
+                </span>
+                <ProviderIcon
+                  src={`/providers/${providerId}.png`}
+                  alt={group.name}
+                  size={14}
+                  fallbackText={(group.name || providerId).slice(0, 2).toUpperCase()}
+                  fallbackColor={group.color}
+                />
+                <span className="text-xs font-medium text-primary truncate">
+                  {group.name}
+                </span>
+                <span className="text-[10px] text-text-muted">
+                  ({group.models.length})
+                </span>
+              </button>
               {closeOnSelect === false && group.models.length > 1 && (
                 <label
                   className="ml-auto flex items-center gap-1 text-[10px] text-text-muted cursor-pointer select-none"
@@ -582,6 +602,7 @@ export default function ModelSelectModal({
               )}
             </div>
 
+            {!collapsedProviders.has(providerId) && (
             <div className="flex flex-wrap gap-1.5">
               {group.models.map((model) => {
                 const isSelected = selectedModel === model.value;
@@ -629,6 +650,7 @@ export default function ModelSelectModal({
                 );
               })}
             </div>
+            )}
           </div>
           );
         })}

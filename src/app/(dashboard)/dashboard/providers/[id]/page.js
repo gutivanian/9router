@@ -1849,12 +1849,20 @@ export default function ProviderDetailPage() {
                     <select
                       value={connGroupFilter}
                       onChange={(e) => setConnGroupFilter(e.target.value)}
-                      className={`rounded-full border px-2 py-0.5 text-xs ${connGroupFilter ? "border-primary text-primary" : "border-black/10 text-text-muted dark:border-white/10"}`}
+                      className={`min-w-[220px] rounded-lg border px-3 py-1.5 text-sm ${connGroupFilter ? "border-primary text-primary" : "border-black/10 text-text-muted dark:border-white/10"}`}
                       title="Filter connections by group"
                     >
-                      <option value="">All groups</option>
-                      {connectionGroups.map((g) => <option key={g} value={g}>{g}</option>)}
-                      {connections.some((c) => !(c.group || "").trim()) && <option value="__ungrouped__">Ungrouped</option>}
+                      <option value="">All groups ({connections.length})</option>
+                      {connectionGroups.map((g) => (
+                        <option key={g} value={g}>
+                          {g} ({connections.filter((c) => (c.group || "").trim() === g).length})
+                        </option>
+                      ))}
+                      {connections.some((c) => !(c.group || "").trim()) && (
+                        <option value="__ungrouped__">
+                          Ungrouped ({connections.filter((c) => !(c.group || "").trim()).length})
+                        </option>
+                      )}
                     </select>
                   )}
                   {connGroupFilter && connGroupFilter !== "__ungrouped__" && (

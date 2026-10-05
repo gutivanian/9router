@@ -7,9 +7,9 @@ import { Card, Badge, Button, Toggle, AddCustomEmbeddingModal } from "@/shared/c
 import ProviderIcon from "@/shared/components/ProviderIcon";
 import { MEDIA_PROVIDER_KINDS, AI_PROVIDERS, getProvidersByKind } from "@/shared/constants/providers";
 
-// Kinds that support combos (currently disabled for image/tts — temporarily hidden).
-// webSearch/webFetch handled by /web page.
-const COMBO_KINDS = new Set([]);
+// Kinds that support combos. webSearch/webFetch are handled by the /web page.
+// A media combo only picks models of its own kind (see kindFilter in the combo editor).
+const COMBO_KINDS = new Set(["embedding", "image", "imageToText", "tts", "stt", "video", "music"]);
 const COMBO_BASE_NAMES = { image: "image-combo", tts: "tts-combo" };
 
 function getEffectiveStatus(conn) {
