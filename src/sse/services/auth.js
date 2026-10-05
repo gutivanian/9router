@@ -2,9 +2,9 @@ import { getProviderConnections, validateApiKey, updateProviderConnection, getSe
 import { resolveConnectionProxyConfig, pickProxyPoolId } from "@/lib/network/connectionProxy";
 import { formatRetryAfter, checkFallbackError, isModelLockActive, buildModelLockUpdate, getEarliestModelLockUntil } from "open-sse/services/accountFallback.js";
 import { MAX_RATE_LIMIT_COOLDOWN_MS } from "open-sse/config/errorConfig.js";
-import { resolveProviderId, FREE_PROVIDERS } from "@/shared/constants/providers.js";
+import { resolveProviderId, FREE_PROVIDERS, resolveProviderResetSchedule } from "@/shared/constants/providers.js";
 import { getAntigravityQuotaCache } from "./antigravityQuota.js";
-import { isRateLimitBlocked, nextStateForRequest } from "@/lib/rateLimits.js";
+import { isRateLimitBlocked, nextStateForRequest, nextDailyReset } from "@/lib/rateLimits.js";
 import * as log from "../utils/logger.js";
 
 // Mutex to prevent race conditions during account selection
@@ -133,12 +133,13 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
     // effective limit before it can decide who to exclude.
     const settings = await getSettings();
     const groupRateLimits = (settings.groupRateLimits || {})[providerId] || {};
+    const resetSchedule = resolveProviderResetSchedule(providerId, settings.providerResetSchedule);
 
     // Filter out model-locked, excluded, rate-limited, and Antigravity quota-exhausted connections.
     const availableConnections = connections.filter(c => {
       if (excludeSet.has(c.id)) return false;
       if (isModelLockActive(c, model)) return false;
-      if (model && isRateLimitBlocked(c, model, groupRateLimits)) return false;
+      if (model && isRateLimitBlocked(c, model, groupRateLimits, resetSchedule)) return false;
       // Antigravity: skip if live quota exhausted for this model
       if (isAntigravity && model && antigravityQuotaCache) {
         const quota = antigravityQuotaCache.get(c.id)?.[model];
@@ -155,7 +156,7 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
     connections.forEach(c => {
       const excluded = excludeSet.has(c.id);
       const locked = isModelLockActive(c, model);
-      const rateLimited = !!model && isRateLimitBlocked(c, model, groupRateLimits);
+      const rateLimited = !!model && isRateLimitBlocked(c, model, groupRateLimits, resetSchedule);
       if (excluded || locked || rateLimited) {
         const lockUntil = getEarliestModelLockUntil(c);
         log.debug("AUTH", `  → ${c.id?.slice(0, 8)} | ${excluded ? "excluded" : ""} ${locked ? `modelLocked(${model}) until ${lockUntil}` : ""} ${rateLimited ? `rateLimited(${model})` : ""}`);
@@ -172,11 +173,15 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
           const state = c.rateLimitState?.[model];
           if (!state) continue;
           // Whichever active window is furthest out is when this connection frees up.
-          for (const [startKey, ms] of [["rpmWindowStart", 60000], ["rpdWindowStart", 86400000], ["tpmWindowStart", 60000], ["tpdWindowStart", 86400000]]) {
+          for (const [startKey, ms] of [["rpmWindowStart", 60000], ["tpmWindowStart", 60000]]) {
             const start = state[startKey];
             if (!start) continue;
             const resetAt = new Date(new Date(start).getTime() + ms).toISOString();
             if (new Date(resetAt).getTime() > Date.now()) expiries.push(resetAt);
+          }
+          for (const startKey of ["rpdWindowStart", "tpdWindowStart"]) {
+            const resetAt = nextDailyReset(state[startKey], resetSchedule);
+            if (resetAt && new Date(resetAt).getTime() > Date.now()) expiries.push(resetAt);
           }
         }
       }
@@ -306,7 +311,7 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
     // here — the token count for this request doesn't exist yet; that happens
     // post-hoc in usageRepo once the response finishes.)
     if (model) {
-      const requestPatch = nextStateForRequest(connection, model, groupRateLimits);
+      const requestPatch = nextStateForRequest(connection, model, groupRateLimits, resetSchedule);
       if (requestPatch) await bumpRateLimitCounters(connection.id, model, requestPatch);
     }
 

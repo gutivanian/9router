@@ -6,7 +6,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { getProviderIconSrc, markProviderIconMissing } from "@/shared/utils/providerIcon";
 import { Card, Button, Badge, Input, Modal, CardSkeleton, OAuthModal, KiroOAuthWrapper, CursorAuthModal, IFlowCookieModal, GitLabAuthModal, Toggle, Select, EditConnectionModal, RateLimitsModal, NoAuthProxyCard, ConfirmModal } from "@/shared/components";
-import { OAUTH_PROVIDERS, APIKEY_PROVIDERS, FREE_PROVIDERS, FREE_TIER_PROVIDERS, WEB_COOKIE_PROVIDERS, getProviderAlias, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, AI_PROVIDERS } from "@/shared/constants/providers";
+import { OAUTH_PROVIDERS, APIKEY_PROVIDERS, FREE_PROVIDERS, FREE_TIER_PROVIDERS, WEB_COOKIE_PROVIDERS, getProviderAlias, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, AI_PROVIDERS, PROVIDER_QUOTA_RESET_DEFAULTS } from "@/shared/constants/providers";
 import { getModelsByProviderId, getModelKind } from "@/shared/constants/models";
 import { getThinkingLevels } from "open-sse/providers/thinkingLevels.js";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
@@ -25,6 +25,23 @@ import BulkImportCodexModal from "./BulkImportCodexModal";
 import BulkImportGrokCliModal from "./BulkImportGrokCliModal";
 
 const ONE_BY_ONE_DELAY_MS = 1000;
+
+// Common IANA timezones for the daily-reset picker — covers where most AI
+// providers publish their quota reset time. "Custom" lets anyone type an
+// arbitrary IANA name for providers not listed here.
+const COMMON_RESET_TIMEZONES = [
+  { value: "America/Los_Angeles", label: "Pacific (Los Angeles)" },
+  { value: "America/Denver", label: "Mountain (Denver)" },
+  { value: "America/Chicago", label: "Central (Chicago)" },
+  { value: "America/New_York", label: "Eastern (New York)" },
+  { value: "UTC", label: "UTC" },
+  { value: "Europe/London", label: "London" },
+  { value: "Europe/Berlin", label: "Berlin" },
+  { value: "Asia/Kolkata", label: "India (Kolkata)" },
+  { value: "Asia/Shanghai", label: "China (Shanghai)" },
+  { value: "Asia/Tokyo", label: "Japan (Tokyo)" },
+  { value: "Australia/Sydney", label: "Sydney" },
+];
 
 const AUTO_PING_SETTINGS_KEYS = {
   claude: "claudeAutoPing",
@@ -53,6 +70,8 @@ export default function ProviderDetailPage() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [rateLimitsConnection, setRateLimitsConnection] = useState(null);
   const [groupRateLimits, setGroupRateLimits] = useState({}); // settings.groupRateLimits[providerId] — group defaults
+  const [resetScheduleOverride, setResetScheduleOverride] = useState(null); // settings.providerResetSchedule[providerId], or null if unset
+  const [showResetScheduleEditor, setShowResetScheduleEditor] = useState(false);
   const [editingGroupLimits, setEditingGroupLimits] = useState(null); // group name string, or null
   const [showEditNodeModal, setShowEditNodeModal] = useState(false);
   const [showBulkProxyModal, setShowBulkProxyModal] = useState(false);
@@ -511,11 +530,40 @@ export default function ProviderDetailPage() {
     fetch("/api/settings")
       .then((res) => (res.ok ? res.json() : {}))
       .then((data) => {
-        if (!cancelled) setGroupRateLimits((data.groupRateLimits || {})[providerId] || {});
+        if (cancelled) return;
+        setGroupRateLimits((data.groupRateLimits || {})[providerId] || {});
+        setResetScheduleOverride((data.providerResetSchedule || {})[providerId] || null);
       })
       .catch(() => {});
     return () => { cancelled = true; };
   }, [providerId]);
+
+  // Effective RPD/TPD reset schedule for this provider: the user's own
+  // override if they set one, else this provider's known default (e.g.
+  // Gemini resets at midnight Pacific), else null (rolling 24h).
+  const resetSchedule = resetScheduleOverride || PROVIDER_QUOTA_RESET_DEFAULTS[providerId] || null;
+
+  const handleSaveResetSchedule = async (next) => {
+    try {
+      const res = await fetch("/api/settings");
+      const settingsData = res.ok ? await res.json() : {};
+      const allResetSchedules = { ...(settingsData.providerResetSchedule || {}) };
+      if (next) allResetSchedules[providerId] = next;
+      else delete allResetSchedules[providerId];
+
+      const patchRes = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ providerResetSchedule: allResetSchedules }),
+      });
+      if (patchRes.ok) {
+        setResetScheduleOverride(next || null);
+        setShowResetScheduleEditor(false);
+      }
+    } catch (error) {
+      console.log("Error saving provider reset schedule:", error);
+    }
+  };
 
   // Cursor's model availability is account-specific and changes frequently.
   // Load the active account's live catalog for the dashboard; the static
@@ -1176,6 +1224,7 @@ export default function ProviderDetailPage() {
                 }}
                 onEditRateLimits={() => setRateLimitsConnection(conn)}
                 groupRateLimits={groupRateLimits}
+                resetSchedule={resetSchedule}
                 onDelete={() => handleDelete(conn.id)}
                 oneByOneStatus={oneByOneResults[conn.id] || null}
               />
@@ -1686,6 +1735,17 @@ export default function ProviderDetailPage() {
                   </div>
                 )}
               </div>
+              <button
+                type="button"
+                onClick={() => setShowResetScheduleEditor(true)}
+                className={`flex h-8 shrink-0 items-center gap-1 rounded-lg border px-2 text-xs transition-colors ${resetScheduleOverride ? "border-primary/40 text-primary" : "border-black/10 text-text-muted hover:bg-black/5 dark:border-white/10 dark:hover:bg-white/5"}`}
+                title="When this provider's RPD/TPD rate-limit caps reset"
+              >
+                <span className="material-symbols-outlined text-[14px]">event_repeat</span>
+                {resetSchedule
+                  ? `Daily reset: ${resetSchedule.timezone} ${String(resetSchedule.hour || 0).padStart(2, "0")}:00`
+                  : "Daily reset: rolling 24h"}
+              </button>
             </div>
           </div>
 
@@ -2095,6 +2155,16 @@ export default function ProviderDetailPage() {
           onClose={() => setEditingGroupLimits(null)}
         />
       )}
+      {showResetScheduleEditor && (
+        <ResetScheduleModal
+          isOpen={true}
+          providerId={providerId}
+          current={resetScheduleOverride}
+          registryDefault={PROVIDER_QUOTA_RESET_DEFAULTS[providerId] || null}
+          onSave={handleSaveResetSchedule}
+          onClose={() => setShowResetScheduleEditor(false)}
+        />
+      )}
       {isCompatible && (
         <EditCompatibleNodeModal
           isOpen={showEditNodeModal}
@@ -2155,5 +2225,110 @@ export default function ProviderDetailPage() {
         variant="danger"
       />
     </div>
+  );
+}
+
+// When this provider's RPD/TPD rate-limit counters reset. "Automatic" means
+// rolling 24h (resets exactly 24h after the window's first request) unless
+// this provider has a known fixed reset time (e.g. Gemini at midnight
+// Pacific) — "Custom" lets the user override that with their own timezone +
+// hour, for providers whose actual reset time isn't built in yet.
+function ResetScheduleModal({ isOpen, providerId, current, registryDefault, onSave, onClose }) {
+  const [mode, setMode] = useState(current ? "custom" : "auto");
+  const [timezone, setTimezone] = useState(current?.timezone || registryDefault?.timezone || "America/Los_Angeles");
+  const [customTimezone, setCustomTimezone] = useState(
+    current?.timezone && !COMMON_RESET_TIMEZONES.some((tz) => tz.value === current.timezone) ? current.timezone : ""
+  );
+  const [hour, setHour] = useState(String(current?.hour ?? registryDefault?.hour ?? 0));
+  const [saving, setSaving] = useState(false);
+
+  const isCustomTimezoneSelected = timezone === "__custom__";
+  const effectiveTimezone = isCustomTimezoneSelected ? customTimezone.trim() : timezone;
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      if (mode === "auto") {
+        await onSave(null);
+      } else {
+        const h = Math.min(23, Math.max(0, Number.parseInt(hour, 10) || 0));
+        if (!effectiveTimezone) return;
+        await onSave({ timezone: effectiveTimezone, hour: h });
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title={`Daily reset — ${providerId}`}
+      footer={
+        <>
+          <Button onClick={onClose} variant="ghost" fullWidth>Cancel</Button>
+          <Button onClick={handleSave} fullWidth disabled={saving || (mode === "custom" && !effectiveTimezone)}>
+            {saving ? "Saving..." : "Save"}
+          </Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-4">
+        <p className="text-xs text-text-muted">
+          Controls when this provider&apos;s RPD/TPD rate-limit caps reset — not the per-minute RPM/TPM caps, which always roll every 60s. This only affects the proactive-avoidance tracker in this app, not the provider&apos;s own enforcement.
+        </p>
+
+        <label className={`flex cursor-pointer items-start gap-2 rounded-lg border p-3 text-sm ${mode === "auto" ? "border-primary bg-primary/5" : "border-black/10 dark:border-white/10"}`}>
+          <input type="radio" className="mt-0.5" checked={mode === "auto"} onChange={() => setMode("auto")} />
+          <span>
+            <span className="font-medium">Automatic</span>
+            <span className="block text-xs text-text-muted">
+              {registryDefault
+                ? `Resets daily at ${registryDefault.hour || 0}:00 ${registryDefault.timezone} (known default for ${providerId}).`
+                : "Rolling 24h — resets exactly 24h after the window's first request (no known fixed reset time for this provider)."}
+            </span>
+          </span>
+        </label>
+
+        <label className={`flex cursor-pointer items-start gap-2 rounded-lg border p-3 text-sm ${mode === "custom" ? "border-primary bg-primary/5" : "border-black/10 dark:border-white/10"}`}>
+          <input type="radio" className="mt-0.5" checked={mode === "custom"} onChange={() => setMode("custom")} />
+          <span className="flex-1">
+            <span className="font-medium">Custom</span>
+            <span className="mt-2 flex flex-wrap items-center gap-2">
+              <select
+                value={timezone}
+                onChange={(e) => setTimezone(e.target.value)}
+                disabled={mode !== "custom"}
+                className="rounded-lg border border-black/10 bg-transparent px-2 py-1.5 text-xs disabled:opacity-50 dark:border-white/10"
+              >
+                {COMMON_RESET_TIMEZONES.map((tz) => <option key={tz.value} value={tz.value}>{tz.label}</option>)}
+                <option value="__custom__">Custom IANA name…</option>
+              </select>
+              {isCustomTimezoneSelected && (
+                <input
+                  type="text"
+                  value={customTimezone}
+                  onChange={(e) => setCustomTimezone(e.target.value)}
+                  disabled={mode !== "custom"}
+                  placeholder="e.g. Asia/Singapore"
+                  className="w-40 rounded-lg border border-black/10 bg-transparent px-2 py-1.5 text-xs disabled:opacity-50 dark:border-white/10"
+                />
+              )}
+              <select
+                value={hour}
+                onChange={(e) => setHour(e.target.value)}
+                disabled={mode !== "custom"}
+                className="rounded-lg border border-black/10 bg-transparent px-2 py-1.5 text-xs disabled:opacity-50 dark:border-white/10"
+              >
+                {Array.from({ length: 24 }, (_, h) => (
+                  <option key={h} value={h}>{String(h).padStart(2, "0")}:00</option>
+                ))}
+              </select>
+            </span>
+          </span>
+        </label>
+      </div>
+    </Modal>
   );
 }

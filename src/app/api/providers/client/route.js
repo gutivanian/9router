@@ -1,14 +1,17 @@
 import { NextResponse } from "next/server";
-import { getProviderConnections } from "@/lib/localDb";
+import { getProviderConnections, getSettings } from "@/lib/localDb";
 import { backfillCodexEmails } from "@/lib/oauth/providers";
 import { USAGE_APIKEY_PROVIDERS, USAGE_SUPPORTED_PROVIDERS } from "@/shared/constants/providers";
 
 const SAFE_FIELDS = [
   "id", "provider", "authType", "name", "email", "displayName",
-  "priority", "globalPriority", "isActive", "defaultModel",
+  "priority", "globalPriority", "isActive", "defaultModel", "group",
   "testStatus", "lastError", "lastErrorAt", "errorCode",
   "expiresAt", "lastUsedAt", "consecutiveUseCount",
   "createdAt", "updatedAt",
+  // Not secrets — just the user's own configured caps and current counters,
+  // needed client-side to render the custom RPM/RPD/TPM/TPD usage tracker.
+  "rateLimits", "rateLimitState",
 ];
 
 const SAFE_PSD_FIELDS = [
@@ -43,10 +46,26 @@ function sanitize(c) {
   return safe;
 }
 
-function isUsageEligible(connection) {
+function hasNativeUsage(connection) {
   return USAGE_SUPPORTED_PROVIDERS.includes(connection.provider) && (
     connection.authType === "oauth" || USAGE_APIKEY_PROVIDERS.includes(connection.provider)
   );
+}
+
+// True if this connection has its own RPM/RPD/TPM/TPD caps, or inherits any
+// from its group's default — the "custom tracker" (ours, not the provider's).
+function hasCustomRateLimits(connection, allGroupRateLimits) {
+  if (connection.rateLimits && Object.keys(connection.rateLimits).length > 0) return true;
+  const group = (connection.group || "").trim();
+  if (!group) return false;
+  const groupLimits = (allGroupRateLimits[connection.provider] || {})[group];
+  return !!(groupLimits && Object.keys(groupLimits).length > 0);
+}
+
+// Eligible for the Quota Tracker page if either kind of tracking applies:
+// the provider's own native quota API, or the user's own configured caps.
+function isUsageEligible(connection, allGroupRateLimits) {
+  return hasNativeUsage(connection) || hasCustomRateLimits(connection, allGroupRateLimits);
 }
 
 function parsePositiveInt(value, fallback) {
@@ -80,17 +99,29 @@ export async function GET(request) {
 
     const { searchParams } = new URL(request.url);
     const provider = searchParams.get("provider") || "all";
+    const group = (searchParams.get("group") || "").trim();
     const accountStatus = searchParams.get("accountStatus") || "all";
     const sort = searchParams.get("sort") || "priority";
     const page = parsePositiveInt(searchParams.get("page"), 1);
     const pageSize = Math.min(parsePositiveInt(searchParams.get("pageSize"), DEFAULT_PAGE_SIZE), MAX_PAGE_SIZE);
 
+    const settings = await getSettings();
+    const allGroupRateLimits = settings.groupRateLimits || {};
+
     const allConnections = await getProviderConnections();
-    const eligibleConnections = allConnections.filter(isUsageEligible);
+    const eligibleConnections = allConnections.filter((conn) => isUsageEligible(conn, allGroupRateLimits));
     const providerOptions = Array.from(new Set(eligibleConnections.map((conn) => conn.provider))).sort();
 
+    const groupOptions = Array.from(new Set(
+      eligibleConnections
+        .filter((conn) => provider === "all" || conn.provider === provider)
+        .map((conn) => (conn.group || "").trim())
+        .filter(Boolean),
+    )).sort();
+
     const providerFilteredConnections = eligibleConnections.filter((conn) => (
-      provider === "all" || conn.provider === provider
+      (provider === "all" || conn.provider === provider) &&
+      (!group || (conn.group || "").trim() === group)
     ));
 
     const accountFilteredConnections = providerFilteredConnections.filter((conn) => {
@@ -109,6 +140,7 @@ export async function GET(request) {
     return NextResponse.json({
       connections: pageConnections,
       providerOptions,
+      groupOptions,
       pagination: {
         page: currentPage,
         pageSize,

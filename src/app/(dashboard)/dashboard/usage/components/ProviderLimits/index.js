@@ -39,8 +39,8 @@ import {
   QUOTA_SORT_OPTIONS,
 } from "./utils";
 import Card from "@/shared/components/Card";
-import { ConfirmModal, EditConnectionModal } from "@/shared/components";
-import { USAGE_SUPPORTED_PROVIDERS } from "@/shared/constants/providers";
+import { ConfirmModal, EditConnectionModal, RateLimitUsageTable } from "@/shared/components";
+import { USAGE_SUPPORTED_PROVIDERS, resolveProviderResetSchedule } from "@/shared/constants/providers";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 
 // Maps the stored providerSpecificData.authMethod to a human label for Kiro.
@@ -147,9 +147,13 @@ export default function ProviderLimits() {
   const [proxyPools, setProxyPools] = useState([]);
   const [providerFilter, setProviderFilter] = useState("all");
   const [providerOptions, setProviderOptions] = useState([]);
+  const [groupFilter, setGroupFilter] = useState("");
+  const [groupOptions, setGroupOptions] = useState([]);
   const [accountFilter, setAccountFilter] = useState("all");
   const [quotaSortMode, setQuotaSortMode] = useState("default");
   const [quotaVisibility, setQuotaVisibility] = useState({});
+  const [groupRateLimits, setGroupRateLimits] = useState({}); // settings.groupRateLimits, keyed by provider
+  const [providerResetSchedule, setProviderResetSchedule] = useState({}); // settings.providerResetSchedule, keyed by provider
   const [expiringFirst, setExpiringFirst] = useState(false);
   const [providerMenuOpen, setProviderMenuOpen] = useState(false);
   const [bulkToggling, setBulkToggling] = useState(false);
@@ -186,6 +190,9 @@ export default function ProviderLimits() {
         if (providerFilter !== "all") {
           params.set("provider", providerFilter);
         }
+        if (groupFilter) {
+          params.set("group", groupFilter);
+        }
 
         const response = await fetch(
           `/api/providers/client?${params.toString()}`,
@@ -199,6 +206,7 @@ export default function ProviderLimits() {
 
         setConnections(connectionList);
         setProviderOptions(getProviderOptions(data.providerOptions));
+        setGroupOptions(Array.isArray(data.groupOptions) ? data.groupOptions : []);
         setPagination(nextPagination);
         setTotals(nextTotals);
         setPage(getPaginationPageValue(data.pagination, targetPage));
@@ -212,7 +220,7 @@ export default function ProviderLimits() {
         return [];
       }
     },
-    [accountFilter, expiringFirst, page, pageSize, providerFilter],
+    [accountFilter, expiringFirst, page, pageSize, providerFilter, groupFilter],
   );
 
   // Fetch quota for a specific connection
@@ -477,17 +485,21 @@ export default function ProviderLimits() {
 
     try {
       const visibleConnections = await fetchConnections(page);
+      // loading/errors/quotaData only ever apply to the provider's own native
+      // quota API — connections tracked solely via our own RPM/RPD/TPM/TPD caps
+      // (e.g. Gemini) have nothing to fetch and render synchronously instead.
+      const nativeConnections = visibleConnections.filter((c) => USAGE_SUPPORTED_PROVIDERS.includes(c.provider));
 
-      setLoading(buildLoadingState(visibleConnections));
+      setLoading(buildLoadingState(nativeConnections));
       setErrors((prev) =>
-        filterQuotaStateByConnections(prev, visibleConnections),
+        filterQuotaStateByConnections(prev, nativeConnections),
       );
       setQuotaData((prev) =>
-        filterQuotaStateByConnections(prev, visibleConnections),
+        filterQuotaStateByConnections(prev, nativeConnections),
       );
 
       await Promise.all(
-        visibleConnections
+        nativeConnections
           .filter(shouldFetch)
           .map((conn) => fetchQuota(conn.id, conn.provider)),
       );
@@ -505,18 +517,19 @@ export default function ProviderLimits() {
       setConnectionsLoading(true);
       const visibleConnections = await fetchConnections(page);
       setConnectionsLoading(false);
+      const nativeConnections = visibleConnections.filter((c) => USAGE_SUPPORTED_PROVIDERS.includes(c.provider));
 
       // Always fetch fresh quota on mount, no cache display
-      setLoading(buildLoadingState(visibleConnections));
+      setLoading(buildLoadingState(nativeConnections));
       setErrors((prev) =>
-        filterQuotaStateByConnections(prev, visibleConnections),
+        filterQuotaStateByConnections(prev, nativeConnections),
       );
       setQuotaData((prev) =>
-        filterQuotaStateByConnections(prev, visibleConnections),
+        filterQuotaStateByConnections(prev, nativeConnections),
       );
 
       await Promise.all(
-        visibleConnections.map((conn) => fetchQuota(conn.id, conn.provider)),
+        nativeConnections.map((conn) => fetchQuota(conn.id, conn.provider)),
       );
       setLastUpdated(new Date());
     };
@@ -547,6 +560,8 @@ export default function ProviderLimits() {
           codex: s?.codexAutoPing?.connections || {},
         });
         setQuotaVisibility(s?.quotaVisibility || {});
+        setGroupRateLimits(s?.groupRateLimits || {});
+        setProviderResetSchedule(s?.providerResetSchedule || {});
       })
       .catch(() => {});
   }, []);
@@ -898,6 +913,22 @@ export default function ProviderLimits() {
               </>
             )}
           </div>
+          {groupOptions.length > 0 && (
+            <select
+              value={groupFilter}
+              onChange={(event) => {
+                setPage(1);
+                setGroupFilter(event.target.value);
+              }}
+              className="h-8 rounded-lg border border-black/10 bg-black/[0.02] px-2 text-xs text-text-primary outline-none transition-colors hover:bg-black/5 dark:border-white/10 dark:bg-white/[0.03] dark:hover:bg-white/10"
+              aria-label="Filter connections by group"
+            >
+              <option value="">All groups</option>
+              {groupOptions.map((g) => (
+                <option key={g} value={g}>{g}</option>
+              ))}
+            </select>
+          )}
           <select
             value={accountFilter}
             onChange={(event) => {
@@ -1035,6 +1066,17 @@ export default function ProviderLimits() {
           const rawQuotas = quota?.quotas || [];
           const visibleQuotas = filterQuotasByVisibility(conn.provider, rawQuotas, quotaVisibility);
           const hiddenQuotaRows = getHiddenQuotaRows(conn.provider, rawQuotas, quotaVisibility);
+          // Two independent tracking sources can both apply to one connection:
+          // the provider's own native quota API, and/or our own configured
+          // RPM/RPD/TPM/TPD caps. Each renders only when it actually has data.
+          const hasNativeUsage = USAGE_SUPPORTED_PROVIDERS.includes(conn.provider);
+          const connGroupLimits = groupRateLimits[conn.provider] || {};
+          const connResetSchedule = resolveProviderResetSchedule(conn.provider, providerResetSchedule);
+          const hasCustomLimits = (() => {
+            if (conn.rateLimits && Object.keys(conn.rateLimits).length > 0) return true;
+            const g = (conn.group || "").trim();
+            return !!(g && connGroupLimits[g] && Object.keys(connGroupLimits[g]).length > 0);
+          })();
 
           return (
             <Card
@@ -1237,58 +1279,73 @@ export default function ProviderLimits() {
               </div>
 
               <div className="px-2 py-1.5">
-                {isLoading ? (
-                  <div className="text-center py-5 text-text-muted">
-                    <span className="material-symbols-outlined text-[28px] animate-spin">
-                      progress_activity
-                    </span>
-                  </div>
-                ) : error ? (
-                  <div className="text-center py-5">
-                    <span className="material-symbols-outlined text-[28px] text-red-500">
-                      error
-                    </span>
-                    <p className="mt-1.5 text-xs text-text-muted">{error}</p>
-                  </div>
-                ) : quota?.message ? (
-                  <div className="text-center py-5">
-                    <p className="text-xs text-text-muted">{quota.message}</p>
-                  </div>
-                ) : (
-                  <QuotaTable
-                    quotas={visibleQuotas}
-                    compact
-                    sortMode="default"
-                    showSortLabel={
-                      conn.provider === "codex" && quotaSortMode !== "default"
-                    }
-                    onHideQuota={(quotaRow) => handleHideQuota(conn.provider, quotaRow)}
-                  />
+                {hasNativeUsage && (
+                  <>
+                    {isLoading ? (
+                      <div className="text-center py-5 text-text-muted">
+                        <span className="material-symbols-outlined text-[28px] animate-spin">
+                          progress_activity
+                        </span>
+                      </div>
+                    ) : error ? (
+                      <div className="text-center py-5">
+                        <span className="material-symbols-outlined text-[28px] text-red-500">
+                          error
+                        </span>
+                        <p className="mt-1.5 text-xs text-text-muted">{error}</p>
+                      </div>
+                    ) : quota?.message ? (
+                      <div className="text-center py-5">
+                        <p className="text-xs text-text-muted">{quota.message}</p>
+                      </div>
+                    ) : (
+                      <QuotaTable
+                        quotas={visibleQuotas}
+                        compact
+                        sortMode="default"
+                        showSortLabel={
+                          conn.provider === "codex" && quotaSortMode !== "default"
+                        }
+                        onHideQuota={(quotaRow) => handleHideQuota(conn.provider, quotaRow)}
+                      />
+                    )}
+                    {quota?.message && !error && !isLoading && (
+                      <p className="mt-2 px-1 text-[10px] leading-relaxed text-text-muted">
+                        {quota.message}
+                      </p>
+                    )}
+                    {hiddenQuotaRows.length > 0 && (
+                      <div className="mt-2 flex min-w-0 items-center gap-1 border-t border-black/5 pt-2 text-[10px] text-text-muted dark:border-white/5">
+                        <span className="material-symbols-outlined shrink-0 text-[14px]">
+                          visibility_off
+                        </span>
+                        <span className="shrink-0">Hidden:</span>
+                        <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto whitespace-nowrap pb-2">
+                          {hiddenQuotaRows.map((quotaRow) => (
+                            <button
+                              key={getQuotaVisibilityKey(quotaRow)}
+                              type="button"
+                              onClick={() => handleShowQuota(conn.provider, quotaRow)}
+                              className="shrink-0 rounded-md border border-black/10 px-1.5 py-0.5 transition-colors hover:bg-black/5 hover:text-text-primary dark:border-white/10 dark:hover:bg-white/5"
+                              title="Show this quota row"
+                            >
+                              {quotaRow.name}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </>
                 )}
-                {quota?.message && !error && !isLoading && (
-                  <p className="mt-2 px-1 text-[10px] leading-relaxed text-text-muted">
-                    {quota.message}
-                  </p>
-                )}
-                {hiddenQuotaRows.length > 0 && (
-                  <div className="mt-2 flex min-w-0 items-center gap-1 border-t border-black/5 pt-2 text-[10px] text-text-muted dark:border-white/5">
-                    <span className="material-symbols-outlined shrink-0 text-[14px]">
-                      visibility_off
-                    </span>
-                    <span className="shrink-0">Hidden:</span>
-                    <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto whitespace-nowrap pb-2">
-                      {hiddenQuotaRows.map((quotaRow) => (
-                        <button
-                          key={getQuotaVisibilityKey(quotaRow)}
-                          type="button"
-                          onClick={() => handleShowQuota(conn.provider, quotaRow)}
-                          className="shrink-0 rounded-md border border-black/10 px-1.5 py-0.5 transition-colors hover:bg-black/5 hover:text-text-primary dark:border-white/10 dark:hover:bg-white/5"
-                          title="Show this quota row"
-                        >
-                          {quotaRow.name}
-                        </button>
-                      ))}
-                    </div>
+                {hasCustomLimits && (
+                  <div className={hasNativeUsage ? "mt-2 border-t border-black/5 pt-2 dark:border-white/5" : ""}>
+                    {hasNativeUsage && (
+                      <p className="mb-1.5 flex items-center gap-1 text-[10px] uppercase tracking-wide text-text-muted">
+                        <span className="material-symbols-outlined text-[12px]">speed</span>
+                        Your custom RPM/RPD/TPM/TPD caps
+                      </p>
+                    )}
+                    <RateLimitUsageTable connection={conn} groupRateLimits={connGroupLimits} resetSchedule={connResetSchedule} />
                   </div>
                 )}
               </div>

@@ -323,11 +323,13 @@ export async function saveRequestUsage(entry) {
           const { getProviderConnectionById, bumpRateLimitCounters } = await import("./connectionsRepo.js");
           const { getSettings } = await import("./settingsRepo.js");
           const { nextStateForTokens } = await import("../../rateLimits.js");
+          const { resolveProviderResetSchedule } = await import("../../../shared/constants/providers.js");
           const conn = await getProviderConnectionById(entry.connectionId);
           if (conn) {
             const settings = await getSettings();
             const groupRateLimits = (settings.groupRateLimits || {})[entry.provider] || {};
-            const patch = nextStateForTokens(conn, entry.model, groupRateLimits, tokensUsed);
+            const resetSchedule = resolveProviderResetSchedule(entry.provider, settings.providerResetSchedule);
+            const patch = nextStateForTokens(conn, entry.model, groupRateLimits, tokensUsed, resetSchedule);
             if (patch) await bumpRateLimitCounters(conn.id, entry.model, patch);
           }
         } catch (e) {

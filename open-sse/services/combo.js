@@ -350,6 +350,10 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
   let lastError = null;
   let earliestRetryAfter = null;
   let lastStatus = null;
+  // Every model's own failure reason, not just the last one — so when the whole
+  // combo is exhausted the client (and logs) can see that each model really was
+  // unavailable, not just the final one tried.
+  const attemptErrors = [];
 
   for (let i = 0; i < rotatedModels.length; i++) {
     const modelStr = rotatedModels[i];
@@ -411,12 +415,14 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
       // Fallback to next model
       recordComboModelResult(modelStr, false);
       lastError = errorText || String(result.status);
+      attemptErrors.push(`[${modelStr}] ${lastError}`);
       if (!lastStatus) lastStatus = result.status;
       log.warn("COMBO", `Model ${modelStr} failed, trying next`, { status: result.status });
     } catch (error) {
       // Catch unexpected exceptions to ensure fallback continues
       recordComboModelResult(modelStr, false);
       lastError = error.message || String(error);
+      attemptErrors.push(`[${modelStr}] ${lastError}`);
       if (!lastStatus) lastStatus = 500;
       log.warn("COMBO", `Model ${modelStr} threw error, trying next`, { error: lastError });
     } finally {
@@ -430,7 +436,9 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
   // or have no active credentials. 503 is more accurate and retryable by clients.
   const allDisabled = lastError && lastError.toLowerCase().includes("no credentials");
   const status = allDisabled ? 503 : (lastStatus || 503);
-  const msg = lastError || "All combo models unavailable";
+  const msg = attemptErrors.length > 1
+    ? attemptErrors.join(" | ")
+    : (lastError || "All combo models unavailable");
 
   if (earliestRetryAfter) {
     const retryHuman = formatRetryAfter(earliestRetryAfter);
