@@ -99,6 +99,7 @@ export async function GET(request) {
 
     const { searchParams } = new URL(request.url);
     const provider = searchParams.get("provider") || "all";
+    const group = (searchParams.get("group") || "").trim();
     const accountStatus = searchParams.get("accountStatus") || "all";
     const sort = searchParams.get("sort") || "priority";
     const page = parsePositiveInt(searchParams.get("page"), 1);
@@ -111,8 +112,16 @@ export async function GET(request) {
     const eligibleConnections = allConnections.filter((conn) => isUsageEligible(conn, allGroupRateLimits));
     const providerOptions = Array.from(new Set(eligibleConnections.map((conn) => conn.provider))).sort();
 
+    const groupOptions = Array.from(new Set(
+      eligibleConnections
+        .filter((conn) => provider === "all" || conn.provider === provider)
+        .map((conn) => (conn.group || "").trim())
+        .filter(Boolean),
+    )).sort();
+
     const providerFilteredConnections = eligibleConnections.filter((conn) => (
-      provider === "all" || conn.provider === provider
+      (provider === "all" || conn.provider === provider) &&
+      (!group || (conn.group || "").trim() === group)
     ));
 
     const accountFilteredConnections = providerFilteredConnections.filter((conn) => {
@@ -131,6 +140,7 @@ export async function GET(request) {
     return NextResponse.json({
       connections: pageConnections,
       providerOptions,
+      groupOptions,
       pagination: {
         page: currentPage,
         pageSize,

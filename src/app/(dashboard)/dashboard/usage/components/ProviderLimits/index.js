@@ -147,6 +147,8 @@ export default function ProviderLimits() {
   const [proxyPools, setProxyPools] = useState([]);
   const [providerFilter, setProviderFilter] = useState("all");
   const [providerOptions, setProviderOptions] = useState([]);
+  const [groupFilter, setGroupFilter] = useState("");
+  const [groupOptions, setGroupOptions] = useState([]);
   const [accountFilter, setAccountFilter] = useState("all");
   const [quotaSortMode, setQuotaSortMode] = useState("default");
   const [quotaVisibility, setQuotaVisibility] = useState({});
@@ -188,6 +190,9 @@ export default function ProviderLimits() {
         if (providerFilter !== "all") {
           params.set("provider", providerFilter);
         }
+        if (groupFilter) {
+          params.set("group", groupFilter);
+        }
 
         const response = await fetch(
           `/api/providers/client?${params.toString()}`,
@@ -201,6 +206,7 @@ export default function ProviderLimits() {
 
         setConnections(connectionList);
         setProviderOptions(getProviderOptions(data.providerOptions));
+        setGroupOptions(Array.isArray(data.groupOptions) ? data.groupOptions : []);
         setPagination(nextPagination);
         setTotals(nextTotals);
         setPage(getPaginationPageValue(data.pagination, targetPage));
@@ -214,7 +220,7 @@ export default function ProviderLimits() {
         return [];
       }
     },
-    [accountFilter, expiringFirst, page, pageSize, providerFilter],
+    [accountFilter, expiringFirst, page, pageSize, providerFilter, groupFilter],
   );
 
   // Fetch quota for a specific connection
@@ -907,6 +913,22 @@ export default function ProviderLimits() {
               </>
             )}
           </div>
+          {groupOptions.length > 0 && (
+            <select
+              value={groupFilter}
+              onChange={(event) => {
+                setPage(1);
+                setGroupFilter(event.target.value);
+              }}
+              className="h-8 rounded-lg border border-black/10 bg-black/[0.02] px-2 text-xs text-text-primary outline-none transition-colors hover:bg-black/5 dark:border-white/10 dark:bg-white/[0.03] dark:hover:bg-white/10"
+              aria-label="Filter connections by group"
+            >
+              <option value="">All groups</option>
+              {groupOptions.map((g) => (
+                <option key={g} value={g}>{g}</option>
+              ))}
+            </select>
+          )}
           <select
             value={accountFilter}
             onChange={(event) => {
