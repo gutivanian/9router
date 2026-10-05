@@ -5,6 +5,7 @@ import PropTypes from "prop-types";
 import { Card, Badge, Button, Modal, Select, Toggle, EditConnectionModal, ConfirmModal, RateLimitsModal } from "@/shared/components";
 import ConnectionRow from "@/app/(dashboard)/dashboard/providers/[id]/ConnectionRow";
 import { resolveProviderResetSchedule } from "@/shared/constants/providers";
+import { getModelsByProviderId, getModelKind } from "@/shared/constants/models";
 
 // ── AddApiKeyModal ─────────────────────────────────────────────
 function AddApiKeyModal({ isOpen, provider, providerName, proxyPools, onSave, onClose }) {
@@ -114,7 +115,10 @@ AddApiKeyModal.propTypes = {
 
 // ── ConnectionsCard ────────────────────────────────────────────
 // Self-contained card: fetches, displays and manages all connections for a provider.
-export default function ConnectionsCard({ providerId, isOAuth }) {
+// kind (e.g. "stt", "embedding") scopes the rate-limit editor to that media kind's
+// models only. Chat models sharing the same key are left untouched on save; the
+// merged view across chat and media lives in the Quota Tracker, not here.
+export default function ConnectionsCard({ providerId, isOAuth, kind = null }) {
   const [connections, setConnections] = useState([]);
   const [proxyPools, setProxyPools] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -153,6 +157,22 @@ export default function ConnectionsCard({ providerId, isOAuth }) {
   }, [providerId]);
 
   useEffect(() => { fetch_(); }, [fetch_]);
+
+  const kindModelIds = useMemo(
+    () => new Set(getModelsByProviderId(providerId).filter((m) => getModelKind(m, "llm") === kind).map((m) => m.id)),
+    [providerId, kind],
+  );
+  const inScope = (model) => !kind || kindModelIds.has(model);
+  const pickScope = (obj) => Object.fromEntries(Object.entries(obj || {}).filter(([m]) => inScope(m)));
+  // Keep models outside this card's kind as they are, replace the in-scope part with incoming.
+  const mergeScope = (existing, incoming) => ({
+    ...Object.fromEntries(Object.entries(existing || {}).filter(([m]) => !inScope(m))),
+    ...pickScope(incoming),
+  });
+  const scopedGroupRateLimits = useMemo(
+    () => Object.fromEntries(Object.entries(groupRateLimits).map(([g, l]) => [g, pickScope(l)])),
+    [groupRateLimits, kindModelIds, kind], // eslint-disable-line react-hooks/exhaustive-deps
+  );
 
   // Same effective reset schedule the provider page uses: override > registry default > rolling 24h.
   const resetSchedule = resolveProviderResetSchedule(providerId, resetScheduleOverride ? { [providerId]: resetScheduleOverride } : {});
@@ -233,9 +253,10 @@ export default function ConnectionsCard({ providerId, isOAuth }) {
   const handleUpdateKeyRateLimits = async (rateLimits) => {
     if (!rateLimitsConnection) return;
     try {
-      const res = await fetch(`/api/providers/${rateLimitsConnection.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rateLimits }) });
+      const merged = mergeScope(rateLimitsConnection.rateLimits, rateLimits);
+      const res = await fetch(`/api/providers/${rateLimitsConnection.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rateLimits: merged }) });
       if (res.ok) {
-        setConnections((prev) => prev.map((c) => c.id === rateLimitsConnection.id ? { ...c, rateLimits } : c));
+        setConnections((prev) => prev.map((c) => c.id === rateLimitsConnection.id ? { ...c, rateLimits: merged } : c));
         setRateLimitsConnection(null);
       }
     } catch (e) { console.log("rate limits error:", e); }
@@ -255,7 +276,8 @@ export default function ConnectionsCard({ providerId, isOAuth }) {
 
   const handleSaveGroupRateLimits = async (group, limits) => {
     const next = { ...groupRateLimits };
-    if (limits && Object.keys(limits).length > 0) next[group] = limits;
+    const merged = mergeScope(groupRateLimits[group], limits);
+    if (Object.keys(merged).length > 0) next[group] = merged;
     else delete next[group];
     if (await writeGroupRateLimits(next)) {
       setGroupRateLimits(next);
@@ -267,7 +289,10 @@ export default function ConnectionsCard({ providerId, isOAuth }) {
   const handleApplyRateLimitsToGroups = async (targetGroups, limitsObj) => {
     if (!limitsObj || targetGroups.length === 0) return;
     const next = { ...groupRateLimits };
-    for (const g of targetGroups) next[g] = structuredClone(limitsObj);
+    for (const g of targetGroups) {
+      const merged = mergeScope(groupRateLimits[g], structuredClone(limitsObj));
+      if (Object.keys(merged).length > 0) next[g] = merged;
+    }
     if (await writeGroupRateLimits(next)) setGroupRateLimits(next);
   };
 
@@ -350,7 +375,7 @@ export default function ConnectionsCard({ providerId, isOAuth }) {
                 <button
                   type="button"
                   onClick={() => setEditingGroupLimits(connGroupFilter)}
-                  className={`rounded-full p-1.5 transition-colors hover:bg-black/5 dark:hover:bg-white/5 ${groupRateLimits[connGroupFilter] ? "text-primary" : "text-text-muted hover:text-primary"}`}
+                  className={`rounded-full p-1.5 transition-colors hover:bg-black/5 dark:hover:bg-white/5 ${scopedGroupRateLimits[connGroupFilter] && Object.keys(scopedGroupRateLimits[connGroupFilter]).length ? "text-primary" : "text-text-muted hover:text-primary"}`}
                   title={`Default rate limits for group "${connGroupFilter}"`}
                 >
                   <span className="material-symbols-outlined text-[16px]">speed</span>
@@ -368,7 +393,6 @@ export default function ConnectionsCard({ providerId, isOAuth }) {
                 return (
                   <ConnectionRow
                     key={conn.id}
-                    connection={conn}
                     proxyPools={proxyPools}
                     isOAuth={isOAuth}
                     isFirst={idx === 0}
@@ -379,7 +403,8 @@ export default function ConnectionsCard({ providerId, isOAuth }) {
                     onUpdateProxy={(poolId) => handleUpdateProxy(conn.id, poolId)}
                     onEdit={() => { setSelectedConnection(conn); setShowEditModal(true); }}
                     onEditRateLimits={() => setRateLimitsConnection(conn)}
-                    groupRateLimits={groupRateLimits}
+                    connection={{ ...conn, rateLimits: pickScope(conn.rateLimits) }}
+                    groupRateLimits={scopedGroupRateLimits}
                     resetSchedule={resetSchedule}
                     onDelete={() => handleDelete(conn.id)}
                   />
@@ -413,8 +438,9 @@ export default function ConnectionsCard({ providerId, isOAuth }) {
           key={rateLimitsConnection.id}
           isOpen={true}
           title={`Rate Limits — ${rateLimitsConnection.name || rateLimitsConnection.email || rateLimitsConnection.id?.slice(0, 8)}`}
-          limits={rateLimitsConnection.rateLimits}
-          groupDefaults={groupRateLimits[(rateLimitsConnection.group || "").trim()] || {}}
+          limits={pickScope(rateLimitsConnection.rateLimits)}
+          modelOptions={[...kindModelIds].sort()}
+          groupDefaults={scopedGroupRateLimits[(rateLimitsConnection.group || "").trim()] || {}}
           copyTargets={connectionGroups}
           onCopyTo={handleApplyRateLimitsToGroups}
           onSave={handleUpdateKeyRateLimits}
@@ -426,8 +452,9 @@ export default function ConnectionsCard({ providerId, isOAuth }) {
           key={`group-${editingGroupLimits}`}
           isOpen={true}
           title={`Rate Limits — group "${editingGroupLimits}" (default)`}
-          limits={groupRateLimits[editingGroupLimits]}
-          copyOptions={Object.entries(groupRateLimits)
+          limits={scopedGroupRateLimits[editingGroupLimits]}
+          modelOptions={[...kindModelIds].sort()}
+          copyOptions={Object.entries(scopedGroupRateLimits)
             .filter(([g, l]) => g !== editingGroupLimits && l && Object.keys(l).length > 0)
             .map(([g, l]) => ({ label: g, limits: l }))}
           copyTargets={connectionGroups.filter((g) => g !== editingGroupLimits)}
@@ -453,4 +480,5 @@ export default function ConnectionsCard({ providerId, isOAuth }) {
 ConnectionsCard.propTypes = {
   providerId: PropTypes.string.isRequired,
   isOAuth: PropTypes.bool,
+  kind: PropTypes.string,
 };
