@@ -6,7 +6,8 @@ import {
   isValidApiKey,
 } from "../services/auth.js";
 import { getSettings } from "@/lib/localDb";
-import { getModelInfo } from "../services/model.js";
+import { getModelInfo, getComboModels } from "../services/model.js";
+import { handleComboChat } from "open-sse/services/combo.js";
 import { handleEmbeddingsCore } from "open-sse/handlers/embeddingsCore.js";
 import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
 import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
@@ -75,6 +76,27 @@ export async function handleEmbeddings(request) {
     return errorResponse(HTTP_STATUS.BAD_REQUEST, "Missing required field: input");
   }
 
+  // Combo expansion: a combo name fans out across its models (fallback/round-robin).
+  const comboModels = await getComboModels(modelStr);
+  if (comboModels) {
+    const comboStrategies = settings.comboStrategies || {};
+    const comboStrategy = comboStrategies[modelStr]?.fallbackStrategy || settings.comboStrategy || "fallback";
+    log.info("EMBEDDINGS", `Combo "${modelStr}" with ${comboModels.length} models (strategy: ${comboStrategy})`);
+    return handleComboChat({
+      body,
+      models: comboModels,
+      handleSingleModel: (b, m) => handleEmbeddingsSingle({ ...b, model: m }, m, { apiKey, pathname: url.pathname }),
+      log,
+      comboName: modelStr,
+      comboStrategy,
+      comboStickyLimit: settings.comboStickyRoundRobinLimit,
+    });
+  }
+
+  return handleEmbeddingsSingle(body, modelStr, { apiKey, pathname: url.pathname });
+}
+
+async function handleEmbeddingsSingle(body, modelStr, { apiKey, pathname }) {
   const modelInfo = await getModelInfo(modelStr);
   if (!modelInfo.provider) {
     log.warn("EMBEDDINGS", "Invalid model format", { model: modelStr });
@@ -142,7 +164,7 @@ export async function handleEmbeddings(request) {
           model,
           connectionId: credentials.connectionId,
           apiKey,
-          endpoint: url.pathname,
+          endpoint: pathname,
           tokens: usage,
           status: "success",
         }).catch(() => {});

@@ -6,7 +6,8 @@ import {
   isValidApiKey,
 } from "../services/auth.js";
 import { getSettings } from "@/lib/localDb";
-import { getModelInfo } from "../services/model.js";
+import { getModelInfo, getComboModels } from "../services/model.js";
+import { handleComboChat } from "open-sse/services/combo.js";
 import { handleVideoProxyCore, getVideoConfig, sanitizeSecrets } from "open-sse/handlers/videoCore.js";
 import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
 import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
@@ -98,6 +99,35 @@ export async function handleVideoCreate(request, action) {
   const bodyInfo = await readForwardableBody(request);
   if (bodyInfo.error) return bodyInfo.error;
 
+  // Combo expansion: a combo name fans out across its models. Each attempt is a
+  // full create against one model, and the job it returns is bound to whichever
+  // account served it (x-9router-connection-id), so polls still reach the right account.
+  const modelStr = bodyInfo.parsed?.model ? String(bodyInfo.parsed.model) : "";
+  const comboModels = modelStr ? await getComboModels(modelStr) : null;
+  if (comboModels) {
+    const settings = await getSettings();
+    const comboStrategy = settings.comboStrategies?.[modelStr]?.fallbackStrategy || settings.comboStrategy || "fallback";
+    log.info("VIDEO", `Combo "${modelStr}" with ${comboModels.length} models (strategy: ${comboStrategy})`);
+    return handleComboChat({
+      body: bodyInfo.parsed,
+      models: comboModels,
+      handleSingleModel: (_b, m) => runVideoCreate(request, withModel(bodyInfo, m), action),
+      log,
+      comboName: modelStr,
+      comboStrategy,
+      comboStickyLimit: settings.comboStickyRoundRobinLimit,
+    });
+  }
+
+  return runVideoCreate(request, bodyInfo, action);
+}
+
+function withModel(bodyInfo, model) {
+  const parsed = { ...bodyInfo.parsed, model };
+  return { raw: JSON.stringify(parsed), parsed, contentType: bodyInfo.contentType };
+}
+
+async function runVideoCreate(request, bodyInfo, action) {
   const resolved = await resolveVideoProvider(bodyInfo.parsed);
   if (resolved.error) return resolved.error;
   const { provider, model } = resolved;
