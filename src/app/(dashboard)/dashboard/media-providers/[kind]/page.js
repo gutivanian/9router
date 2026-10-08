@@ -9,7 +9,7 @@ import { MEDIA_PROVIDER_KINDS, AI_PROVIDERS, getProvidersByKind } from "@/shared
 
 // Kinds that support combos. webSearch/webFetch are handled by the /web page.
 // A media combo only picks models of its own kind (see kindFilter in the combo editor).
-const COMBO_KINDS = new Set(["embedding", "image", "imageToText", "tts", "stt", "video", "music"]);
+const COMBO_KINDS = new Set(["embedding", "image", "tts", "stt", "video"]);
 const COMBO_BASE_NAMES = { image: "image-combo", tts: "tts-combo" };
 
 function getEffectiveStatus(conn) {
