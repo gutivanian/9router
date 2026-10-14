@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { getStatusVariant as getConnectionStatusVariant } from "@/shared/utils/connectionStatus";
 import PropTypes from "prop-types";
-import { Badge, Toggle, Tooltip, RateLimitUsageTable } from "@/shared/components";
+import { Badge, Toggle, Tooltip } from "@/shared/components";
 import CooldownTimer from "./CooldownTimer";
 
 export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst, isLast, onMoveUp, onMoveDown, onToggleActive, onUpdateProxy, onEdit, onEditRateLimits, groupRateLimits = {}, resetSchedule = null, onDelete, oneByOneStatus = null, autoPing = null }) {
@@ -73,8 +73,9 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
   // group default (already in effect via auth.js's resolveRateLimits fallback,
   // even though nothing is stored on this connection itself).
   const groupDefaultsForConn = groupRateLimits[(connection.group || "").trim()] || {};
-  const rateLimitModels = new Set([...Object.keys(connection.rateLimits || {}), ...Object.keys(groupDefaultsForConn)]);
-  const rateLimitCount = rateLimitModels.size;
+  // Only used to highlight the Limits button when any cap is set. The per-model
+  // usage itself lives on the Quota Tracker page, not here.
+  const rateLimitCount = new Set([...Object.keys(connection.rateLimits || {}), ...Object.keys(groupDefaultsForConn)]).size;
 
   const rowAuthType = connection.authType || (isOAuth ? "oauth" : "apikey");
   const isOAuthConnection = rowAuthType === "oauth";
@@ -277,7 +278,7 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
               title="Set per-model RPM/RPD/TPM/TPD caps"
             >
               <span className="material-symbols-outlined text-[18px]">{rateLimitCount ? "speed" : "avg_pace"}</span>
-              <span className="text-[10px] leading-tight">{rateLimitCount ? `Limits (${rateLimitCount})` : "Limits"}</span>
+              <span className="text-[10px] leading-tight">Limits</span>
             </button>
           )}
           <button onClick={onEdit} className="flex flex-col items-center rounded px-2 py-1 text-text-muted hover:bg-black/5 hover:text-primary dark:hover:bg-white/5">
@@ -297,7 +298,6 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
         />
       </div>
     </div>
-    <RateLimitUsageTable connection={connection} groupRateLimits={groupRateLimits} resetSchedule={resetSchedule} />
     </div>
   );
 }

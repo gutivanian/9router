@@ -3,7 +3,8 @@ import {
   getProviderCredentials, markAccountUnavailable,
 } from "../services/auth.js";
 import { getSettings } from "@/lib/localDb";
-import { getModelInfo } from "../services/model.js";
+import { getModelInfo, getComboModels } from "../services/model.js";
+import { handleComboChat } from "open-sse/services/combo.js";
 import { handleSttCore } from "open-sse/handlers/sttCore.js";
 import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
 import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
@@ -39,6 +40,35 @@ export async function handleStt(request) {
   if (!modelStr) return errorResponse(HTTP_STATUS.BAD_REQUEST, "Missing model");
   if (!formData.get("file")) return errorResponse(HTTP_STATUS.BAD_REQUEST, "Missing required field: file");
 
+  // Combo expansion: a combo name fans out across its models (fallback/round-robin),
+  // same as chat/tts/image. Each attempt gets its own FormData with the model swapped in.
+  const comboModels = await getComboModels(modelStr);
+  if (comboModels) {
+    const comboStrategies = settings.comboStrategies || {};
+    const comboStrategy = comboStrategies[modelStr]?.fallbackStrategy || settings.comboStrategy || "fallback";
+    log.info("STT", `Combo "${modelStr}" with ${comboModels.length} models (strategy: ${comboStrategy})`);
+    return handleComboChat({
+      body: {},
+      models: comboModels,
+      handleSingleModel: (_b, m) => handleSttSingle(cloneFormWithModel(formData, m), m),
+      log,
+      comboName: modelStr,
+      comboStrategy,
+      comboStickyLimit: settings.comboStickyRoundRobinLimit,
+    });
+  }
+
+  return handleSttSingle(formData, modelStr);
+}
+
+function cloneFormWithModel(formData, modelStr) {
+  const next = new FormData();
+  for (const [key, value] of formData.entries()) next.append(key, value);
+  next.set("model", modelStr);
+  return next;
+}
+
+async function handleSttSingle(formData, modelStr) {
   const modelInfo = await getModelInfo(modelStr);
   if (!modelInfo.provider) return errorResponse(HTTP_STATUS.BAD_REQUEST, "Invalid model format");
 

@@ -159,7 +159,7 @@ export default function MediaProviderDetailPage() {
       {!isCustom && provider.noAuth ? (
         <NoAuthProxyCard providerId={id} />
       ) : (
-        <ConnectionsCard providerId={id} isOAuth={false} />
+        <ConnectionsCard providerId={id} isOAuth={false} kind={kind} />
       )}
 
       {/* Models - hidden for tts/webSearch/webFetch (provider IS the model); custom uses prefix as alias */}

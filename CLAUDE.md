@@ -50,9 +50,10 @@ npx vitest run unit/capabilities.test.js   # single file (path relative to tests
 
 ## Architecture
 
-Two authoritative docs already exist — read them before working in these areas rather than re-deriving:
+Three authoritative docs already exist — read them before working in these areas rather than re-deriving:
 - `docs/ARCHITECTURE.md` — full system: request lifecycle, combo/account fallback, OAuth + token refresh, cloud sync, data model.
 - `open-sse/AGENTS.md` — the routing/translation engine's own conventions and "how to add a provider/executor/translator". **Read this before editing anything under `open-sse/`.**
+- `docs/EXTENDING.md` — practical `src/`-side recipes: adding a new `/api/*` or `/v1/*` endpoint (incl. wiring combo support into it), connecting a new provider's dashboard-side pieces (Quota Tracker flags, rate-limit reset default, media-kind listing, OAuth modal), and reading/writing data through the DB repo layer (schema, migrations, settings).
 
 ### Request flow (the thing to understand first)
 `src/app/api/v1/*` route (Next rewrite maps `/v1/*` → `/api/v1/*` in `next.config.mjs`)
