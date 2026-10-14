@@ -1,3 +1,3 @@
-:HL["/_next/static/css/8f9ac5a7bd3a79e5.css","style"]
-:HL["/_next/static/css/a627e29a58cf7699.css","style"]
-0:{"tree":{"name":"","param":null,"prefetchHints":4176,"slots":{"children":{"name":"dashboard","param":null,"prefetchHints":4192,"slots":{"children":{"name":"settings","param":null,"prefetchHints":4192,"slots":{"children":{"name":"pricing","param":null,"prefetchHints":4192,"slots":{"children":{"name":"__PAGE__","param":null,"prefetchHints":4256,"slots":null}}}}}}}}},"staleTime":300,"buildId":"9NM8gv3BfFLVZCjOQapF3"}
+:HL["/_next/static/css/2e1a9a933f2e668f.css","style"]
+:HL["/_next/static/css/485cd46055eae1d5.css","style"]
+0:{"tree":{"name":"","param":null,"prefetchHints":4176,"slots":{"children":{"name":"dashboard","param":null,"prefetchHints":4192,"slots":{"children":{"name":"settings","param":null,"prefetchHints":4192,"slots":{"children":{"name":"pricing","param":null,"prefetchHints":4192,"slots":{"children":{"name":"__PAGE__","param":null,"prefetchHints":4256,"slots":null}}}}}}}}},"staleTime":300,"buildId":"gjr-XQfKuDzYyDXt5kdUi"}
