@@ -2,8 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import { Card, Badge, Button } from "@/shared/components";
+import { Card, Badge } from "@/shared/components";
 import ProviderIcon from "@/shared/components/ProviderIcon";
 import { AI_PROVIDERS, getProvidersByKind } from "@/shared/constants/providers";
 
@@ -65,7 +64,14 @@ function ProviderCard({ provider, kind, connections }) {
 
 function ComboList({ combos }) {
   if (combos.length === 0) {
-    return <p className="text-xs text-text-muted italic">No combos yet.</p>;
+    return (
+      <p className="text-xs text-text-muted italic">
+        No combos yet — create one from{" "}
+        <Link href="/dashboard/combos" className="text-primary hover:underline not-italic">
+          Combo &amp; Vision Adapter
+        </Link>.
+      </p>
+    );
   }
   return (
     <div className="flex flex-col gap-2">
@@ -107,17 +113,16 @@ function ComboList({ combos }) {
   );
 }
 
-function Section({ title, icon, kind, providers, connections, combos, onCreateCombo }) {
+function Section({ title, icon, kind, providers, connections, combos }) {
   return (
     <div>
-      {/* Header — title left, Create Combo right */}
+      {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-3">
         <div className="flex flex-wrap items-center gap-2">
           <span className="material-symbols-outlined text-primary">{icon}</span>
           <h2 className="text-base font-semibold">{title}</h2>
           <span className="text-xs text-text-muted">({providers.length} providers · {combos.length} combos)</span>
         </div>
-        <Button size="sm" icon="add" onClick={onCreateCombo}>Create Combo</Button>
       </div>
 
       {/* Combos — top */}
@@ -144,7 +149,6 @@ function Section({ title, icon, kind, providers, connections, combos, onCreateCo
 }
 
 export default function WebProvidersPage() {
-  const router = useRouter();
   const [connections, setConnections] = useState([]);
   const [combos, setCombos] = useState([]);
 
@@ -167,33 +171,11 @@ export default function WebProvidersPage() {
   const searchCombos = combos.filter((c) => c.kind === "webSearch");
   const fetchCombos = combos.filter((c) => c.kind === "webFetch");
 
-  const handleCreateCombo = async (kind) => {
-    // Generate unique default name
-    const base = kind === "webSearch" ? "search-combo" : "fetch-combo";
-    let name = base;
-    let i = 1;
-    const existing = new Set(combos.map((c) => c.name));
-    while (existing.has(name)) { name = `${base}-${i++}`; }
-    const res = await fetch("/api/combos", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, models: [], kind }),
-    });
-    if (res.ok) {
-      const created = await res.json();
-      router.push(`/dashboard/media-providers/combo/${created.id}`);
-    } else {
-      const err = await res.json();
-      alert(err.error || "Failed to create combo");
-    }
-  };
-
   return (
     <div className="flex flex-col gap-8">
       <Section
         title="Web Search" icon="search" kind="webSearch"
         providers={searchProviders} connections={connections} combos={searchCombos}
-        onCreateCombo={() => handleCreateCombo("webSearch")}
       />
 
       {/* Divider between sections */}
@@ -202,7 +184,6 @@ export default function WebProvidersPage() {
       <Section
         title="Web Fetch" icon="travel_explore" kind="webFetch"
         providers={fetchProviders} connections={connections} combos={fetchCombos}
-        onCreateCombo={() => handleCreateCombo("webFetch")}
       />
     </div>
   );

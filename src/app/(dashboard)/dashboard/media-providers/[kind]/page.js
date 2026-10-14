@@ -9,8 +9,8 @@ import { MEDIA_PROVIDER_KINDS, AI_PROVIDERS, getProvidersByKind } from "@/shared
 
 // Kinds that support combos. webSearch/webFetch are handled by the /web page.
 // A media combo only picks models of its own kind (see kindFilter in the combo editor).
+// Combos themselves are created on the main /dashboard/combos page (kind picked there).
 const COMBO_KINDS = new Set(["embedding", "image", "tts", "stt", "video"]);
-const COMBO_BASE_NAMES = { image: "image-combo", tts: "tts-combo" };
 
 function getEffectiveStatus(conn) {
   const isCooldown = Object.entries(conn).some(
@@ -207,43 +207,26 @@ export default function MediaProviderKindPage() {
     );
   };
 
-  const handleCreateCombo = async () => {
-    const base = COMBO_BASE_NAMES[kind] || `${kind}-combo`;
-    let name = base;
-    let i = 1;
-    const existing = new Set(combos.map((c) => c.name));
-    while (existing.has(name)) { name = `${base}-${i++}`; }
-    const res = await fetch("/api/combos", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, models: [], kind }),
-    });
-    if (res.ok) {
-      const created = await res.json();
-      router.push(`/dashboard/media-providers/combo/${created.id}`);
-    } else {
-      const err = await res.json();
-      alert(err.error || "Failed to create combo");
-    }
-  };
-
   return (
     <div className="flex flex-col gap-6">
-      {(isEmbedding || supportsCombo) && (
+      {isEmbedding && (
         <div className="flex items-center justify-end gap-2">
-          {supportsCombo && (
-            <Button size="sm" icon="add" onClick={handleCreateCombo}>Create Combo</Button>
-          )}
-          {isEmbedding && (
-            <Button size="sm" icon="add" onClick={() => setShowAddCustomEmbedding(true)}>
-              Add Custom Embedding
-            </Button>
-          )}
+          <Button size="sm" icon="add" onClick={() => setShowAddCustomEmbedding(true)}>
+            Add Custom Embedding
+          </Button>
         </div>
       )}
 
       {supportsCombo && kindCombos.length > 0 && (
         <ComboList combos={kindCombos} />
+      )}
+      {supportsCombo && kindCombos.length === 0 && (
+        <p className="text-xs text-text-muted">
+          No {kindConfig.label} combos yet — create one from{" "}
+          <Link href="/dashboard/combos" className="text-primary hover:underline">
+            Combo &amp; Vision Adapter
+          </Link>.
+        </p>
       )}
 
       {allProviders.length === 0 ? (

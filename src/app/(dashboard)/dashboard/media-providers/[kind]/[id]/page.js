@@ -162,8 +162,8 @@ export default function MediaProviderDetailPage() {
         <ConnectionsCard providerId={id} isOAuth={false} kind={kind} />
       )}
 
-      {/* Models - hidden for tts/webSearch/webFetch (provider IS the model); custom uses prefix as alias */}
-      {kind !== "tts" && kind !== "webSearch" && kind !== "webFetch" && (
+      {/* Models - hidden for webSearch/webFetch (provider IS the model, no per-model list to show); custom uses prefix as alias */}
+      {kind !== "webSearch" && kind !== "webFetch" && (
         <ModelsCard
           providerId={id}
           kindFilter={kind}

@@ -36,8 +36,11 @@ export function GenericExampleCard({ providerId, kind }) {
   const exConfig = KIND_EXAMPLE_CONFIG[kind];
   const safeExConfig = exConfig || {};
 
-  // Get models for this kind (e.g., type="image")
-  const kindModels = getModelsByProviderId(providerId).filter((m) => getModelKind(m) === kind);
+  // Get models for this kind (e.g., type="image"), plus any custom models added on the Models card
+  const builtinKindModels = getModelsByProviderId(providerId).filter((m) => getModelKind(m) === kind);
+  const [customKindModels, setCustomKindModels] = useState([]);
+  const builtinKindIds = new Set(builtinKindModels.map((m) => m.id));
+  const kindModels = [...builtinKindModels, ...customKindModels.filter((m) => !builtinKindIds.has(m.id))];
   // Kinds that need a model identifier in the request (image/video/music)
   const KIND_NEEDS_MODEL = new Set(["image", "video", "music", "imageToText"]);
   const needsModel = KIND_NEEDS_MODEL.has(kind);
@@ -87,7 +90,23 @@ export function GenericExampleCard({ providerId, kind }) {
         setConnections(conns);
       })
       .catch(() => {});
-  }, [providerId]);
+    const loadCustomModels = () => {
+      fetch("/api/models/custom", { cache: "no-store" })
+        .then((r) => r.json())
+        .then((d) => {
+          const list = (d.models || []).filter((m) => getModelKind(m) === kind && m.providerAlias === providerAlias);
+          setCustomKindModels(list);
+        })
+        .catch(() => {});
+    };
+    loadCustomModels();
+    window.addEventListener("focus", loadCustomModels);
+    window.addEventListener("customModelChanged", loadCustomModels);
+    return () => {
+      window.removeEventListener("focus", loadCustomModels);
+      window.removeEventListener("customModelChanged", loadCustomModels);
+    };
+  }, [providerId, providerAlias, kind]);
 
   // Safe to early-return now that all hooks are declared
   if (!kindConfig || !exConfig) return null;
