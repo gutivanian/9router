@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -12,6 +14,26 @@ import { isOpenAICompatibleProvider, isAnthropicCompatibleProvider } from "@/sha
 
 // Validate combo name: only a-z, A-Z, 0-9, -, _
 const VALID_NAME_REGEX = /^[a-zA-Z0-9_.\-]+$/;
+
+// Combo kinds a combo can be created as. `""` (stored as null/"llm") is the
+// original chat combo, handled entirely by ComboCard/ComboFormModal below.
+// Everything else groups media-provider models and is edited on its own
+// specialized page (media-providers/combo/[id]) after creation.
+// imageToText/music excluded - no backend endpoint exists for either.
+const COMBO_KIND_OPTIONS = [
+  { value: "", label: "Chat (LLM)" },
+  { value: "embedding", label: "Embedding" },
+  { value: "image", label: "Text to Image" },
+  { value: "tts", label: "Text To Speech" },
+  { value: "stt", label: "Speech To Text" },
+  { value: "video", label: "Video" },
+  { value: "webSearch", label: "Web Search" },
+  { value: "webFetch", label: "Web Fetch" },
+];
+function comboKindLabel(kind) {
+  if (!kind || kind === "llm") return "Chat";
+  return COMBO_KIND_OPTIONS.find((o) => o.value === kind)?.label || kind;
+}
 
 // Capacity adapter: global fallback pools of models per input-modality capability.
 // A request needing a capability the target model/combo lacks switches straight
@@ -46,7 +68,9 @@ function normalizeCapEntry(entry) {
 }
 
 export default function CombosPage() {
+  const router = useRouter();
   const [combos, setCombos] = useState([]);
+  const [listKindFilter, setListKindFilter] = useState("all");
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingCombo, setEditingCombo] = useState(null);
@@ -73,8 +97,7 @@ export default function CombosPage() {
       const providersData = await providersRes.json();
       const settingsData = settingsRes.ok ? await settingsRes.json() : {};
       
-      // Only LLM combos here - webSearch/webFetch combos belong to media-providers/web
-      if (combosRes.ok) setCombos((combosData.combos || []).filter(c => !c.kind || c.kind === "llm"));
+      if (combosRes.ok) setCombos(combosData.combos || []);
       if (providersRes.ok) {
         setActiveProviders(providersData.connections || []);
       }
@@ -114,11 +137,17 @@ export default function CombosPage() {
         body: JSON.stringify(comboData),
       });
       if (res.ok) {
+        const created = await res.json();
         if (accountFilters && Object.keys(accountFilters).length) {
           await handleSetComboStrategy(comboData.name, { accountFilters });
         }
-        await fetchData();
         setShowCreateModal(false);
+        if (comboData.kind) {
+          // Non-chat combos are edited (providers, strategy, keys) on their own page.
+          router.push(`/dashboard/media-providers/combo/${created.id}`);
+          return;
+        }
+        await fetchData();
       } else {
         const err = await res.json();
         alert(err.error || "Failed to create combo");
@@ -216,6 +245,10 @@ export default function CombosPage() {
     );
   }
 
+  const visibleCombos = listKindFilter === "all"
+    ? combos
+    : combos.filter((c) => (listKindFilter === "" ? (!c.kind || c.kind === "llm") : c.kind === listKindFilter));
+
   return (
     <div className="flex min-w-0 flex-col gap-6 px-1 sm:px-0">
       {/* Header */}
@@ -235,6 +268,23 @@ export default function CombosPage() {
         </Button>
       </div>
 
+      {/* Kind filter */}
+      {combos.length > 0 && (
+        <div className="flex items-center gap-2">
+          <label className="text-xs text-text-muted shrink-0">Filter:</label>
+          <select
+            value={listKindFilter}
+            onChange={(e) => setListKindFilter(e.target.value)}
+            className="py-1.5 px-2.5 text-xs text-text-main bg-surface-2 border border-transparent rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+          >
+            <option value="all">All kinds</option>
+            {COMBO_KIND_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
       {/* Combos List */}
       {combos.length === 0 ? (
         <Card>
@@ -249,22 +299,30 @@ export default function CombosPage() {
             </Button>
           </div>
         </Card>
+      ) : visibleCombos.length === 0 ? (
+        <Card>
+          <p className="text-sm text-text-muted text-center py-6">No combos of this kind yet.</p>
+        </Card>
       ) : (
         <div className="flex flex-col gap-4">
-          {combos.map((combo) => (
-            <ComboCard
-              key={combo.id}
-              combo={combo}
-              getCaps={getCaps}
-              activeProviders={activeProviders}
-              copied={copied}
-              onCopy={copy}
-              onEdit={() => setEditingCombo(combo)}
-              onDelete={() => handleDelete(combo.id)}
-              strategy={comboStrategies[combo.name] || {}}
-              comboUsage={keyUsageFor(combo.name)}
-              onSetStrategy={(patch) => handleSetComboStrategy(combo.name, patch)}
-            />
+          {visibleCombos.map((combo) => (
+            (!combo.kind || combo.kind === "llm") ? (
+              <ComboCard
+                key={combo.id}
+                combo={combo}
+                getCaps={getCaps}
+                activeProviders={activeProviders}
+                copied={copied}
+                onCopy={copy}
+                onEdit={() => setEditingCombo(combo)}
+                onDelete={() => handleDelete(combo.id)}
+                strategy={comboStrategies[combo.name] || {}}
+                comboUsage={keyUsageFor(combo.name)}
+                onSetStrategy={(patch) => handleSetComboStrategy(combo.name, patch)}
+              />
+            ) : (
+              <MediaComboCard key={combo.id} combo={combo} onDelete={() => handleDelete(combo.id)} />
+            )
           ))}
         </div>
       )}
@@ -321,6 +379,43 @@ const STRATEGY_OPTIONS = [
   { value: "adaptive", label: "Adaptive — self-healing, prefers healthy models" },
   { value: "fusion", label: "Fusion — panel + judge" },
 ];
+
+// Lightweight card for non-chat (media-provider) combos — full settings
+// (round robin, providers, test example) live on their own detail page.
+function MediaComboCard({ combo, onDelete }) {
+  return (
+    <Card>
+      <div className="flex items-center justify-between gap-3">
+        <Link
+          href={`/dashboard/media-providers/combo/${combo.id}`}
+          className="flex min-w-0 flex-1 items-center gap-3 min-h-0"
+        >
+          <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-primary shrink-0">
+            {comboKindLabel(combo.kind)}
+          </span>
+          <code className="truncate font-mono text-sm font-medium">{combo.name}</code>
+          <span className="text-xs text-text-muted shrink-0">
+            {(combo.models || []).length} model{(combo.models || []).length === 1 ? "" : "s"}
+          </span>
+        </Link>
+        <div className="flex items-center gap-1 shrink-0">
+          <Link
+            href={`/dashboard/media-providers/combo/${combo.id}`}
+            className="p-1.5 rounded-lg text-text-muted hover:text-primary hover:bg-primary/10 transition-colors"
+          >
+            <span className="material-symbols-outlined text-[18px]">chevron_right</span>
+          </Link>
+          <button
+            onClick={onDelete}
+            className="p-1.5 rounded-lg text-text-muted hover:text-red-500 hover:bg-red-500/10 transition-colors"
+          >
+            <span className="material-symbols-outlined text-[18px]">delete</span>
+          </button>
+        </div>
+      </div>
+    </Card>
+  );
+}
 
 function ComboCard({ comboUsage = {}, combo, getCaps, activeProviders = [], copied, onCopy, onEdit, onDelete, strategy = {}, onSetStrategy }) {
   const [showJudgeSelect, setShowJudgeSelect] = useState(false);
@@ -991,10 +1086,13 @@ function ModelItem({ id, index, model, isFirst, isLast, onEdit, onMoveUp, onMove
   );
 }
 
-function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindFilter = null, initialAccountFilters = {}, keyComboUsage = {} }) {
+function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, initialAccountFilters = {}, keyComboUsage = {} }) {
   // Initialize state with combo values - key prop on parent handles reset on remount
   const [name, setName] = useState(combo?.name || "");
   const [models, setModels] = useState(combo?.models || []);
+  // Kind picked at creation time; locked once the combo exists (changing kind
+  // would orphan its models - editing is done on the kind's own detail page instead).
+  const [comboKind, setComboKind] = useState(combo?.kind && combo.kind !== "llm" ? combo.kind : "");
   const [showModelSelect, setShowModelSelect] = useState(false);
   const [saving, setSaving] = useState(false);
   const [nameError, setNameError] = useState("");
@@ -1119,6 +1217,7 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindF
     await onSave({
       name: name.trim(),
       models,
+      kind: comboKind || null,
       accountFilters: buildAccountFiltersPayload(providers, accountDraft, activeProviders),
     });
     setSaving(false);
@@ -1163,6 +1262,31 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindF
               Only letters, numbers, -, _ and . allowed
             </p>
           </div>
+
+          {/* Kind — locked after creation, since changing it would orphan the models below */}
+          {isEdit ? (
+            comboKind && (
+              <p className="text-xs text-text-muted">
+                Type: <span className="font-medium text-text-main">{comboKindLabel(comboKind)}</span>
+              </p>
+            )
+          ) : (
+            <div>
+              <label className="text-sm font-medium mb-1.5 block">Combo Type</label>
+              <select
+                value={comboKind}
+                onChange={(e) => { setComboKind(e.target.value); setModels([]); }}
+                className="w-full py-2.5 px-3 text-sm text-text-main bg-surface-2 border border-transparent rounded-[10px] focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+              >
+                {COMBO_KIND_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+              <p className="text-[10px] text-text-muted mt-0.5">
+                What this combo groups. Can&apos;t be changed after creating.
+              </p>
+            </div>
+          )}
 
           {/* Models */}
           <div>
@@ -1211,7 +1335,7 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindF
           </div>
 
           {/* Keys — per-provider account allow-list (LLM combos only) */}
-          {!kindFilter && (
+          {!comboKind && (
             <div>
               <label className="text-sm font-medium mb-1.5 block">Keys</label>
               <p className="text-[10px] text-text-muted mb-2">
@@ -1251,7 +1375,7 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindF
           activeProviders={activeProviders}
           modelAliases={modelAliases}
           title="Add Model to Combo"
-          kindFilter={kindFilter}
+          kindFilter={comboKind || null}
           addedModelValues={models}
           closeOnSelect={false}
           showDoneButtons

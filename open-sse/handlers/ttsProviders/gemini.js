@@ -1,4 +1,5 @@
-// Gemini TTS — generateContent with AUDIO modality returns PCM L16, wrap as WAV
+// Gemini TTS — generateContent with AUDIO modality. Pre-3.8 models return headerless PCM L16
+// (wrap as WAV ourselves); gemini-3.8+ models default to already-WAV-wrapped output (pass through).
 import { Buffer } from "node:buffer";
 import { PROVIDER_MEDIA, PROVIDER_MODELS } from "../../providers/index.js";
 
@@ -23,6 +24,16 @@ function parseGeminiModelVoice(input) {
     if (input === id) return { modelId: id, voiceId: DEFAULT_VOICE };
     if (input.startsWith(`${id}/`)) return { modelId: id, voiceId: input.slice(id.length + 1) };
   }
+  // Not in the static registry (e.g. a custom model added via the dashboard, or a model Google
+  // released after this build) but still shaped like "model/voice" — split on the last "/"
+  // instead of swallowing the whole string into voiceId.
+  const slashIdx = input.lastIndexOf("/");
+  if (slashIdx > 0) return { modelId: input.slice(0, slashIdx), voiceId: input.slice(slashIdx + 1) };
+  // Bare single token with no slash: a known prebuilt voice name, or a hyphenated string that
+  // looks like a model id (voice names are single capitalized words, never hyphenated).
+  if (/-/.test(input) && !PREBUILT_VOICES.some((v) => v.id === input)) {
+    return { modelId: input, voiceId: DEFAULT_VOICE };
+  }
   return { modelId: DEFAULT_MODEL, voiceId: input };
 }
 // Gemini returns PCM 16-bit signed mono @ 24kHz
@@ -31,9 +42,9 @@ const CHANNELS = 1;
 const BITS_PER_SAMPLE = 16;
 
 // Build WAV header for raw PCM payload
-function pcmToWav(pcmBuffer) {
+function pcmToWav(pcmBuffer, sampleRate = SAMPLE_RATE) {
   const dataSize = pcmBuffer.length;
-  const byteRate = SAMPLE_RATE * CHANNELS * BITS_PER_SAMPLE / 8;
+  const byteRate = sampleRate * CHANNELS * BITS_PER_SAMPLE / 8;
   const blockAlign = CHANNELS * BITS_PER_SAMPLE / 8;
   const header = Buffer.alloc(44);
   header.write("RIFF", 0);
@@ -43,7 +54,7 @@ function pcmToWav(pcmBuffer) {
   header.writeUInt32LE(16, 16);
   header.writeUInt16LE(1, 20);
   header.writeUInt16LE(CHANNELS, 22);
-  header.writeUInt32LE(SAMPLE_RATE, 24);
+  header.writeUInt32LE(sampleRate, 24);
   header.writeUInt32LE(byteRate, 28);
   header.writeUInt16LE(blockAlign, 32);
   header.writeUInt16LE(BITS_PER_SAMPLE, 34);
@@ -79,12 +90,22 @@ export default {
       throw new Error(err?.error?.message || `Gemini TTS failed: ${res.status}`);
     }
     const data = await res.json();
-    const b64 = data?.candidates?.[0]?.content?.parts?.find((p) => p.inlineData?.data)?.inlineData?.data;
+    const audioPart = data?.candidates?.[0]?.content?.parts?.find((p) => p.inlineData?.data)?.inlineData;
+    const b64 = audioPart?.data;
     if (!b64) {
       const reason = data?.candidates?.[0]?.finishReason || data?.promptFeedback?.blockReason || "unknown";
       throw new Error(`Gemini TTS returned no audio (finishReason: ${reason}, voice: ${voiceId}, model: ${modelId})`);
     }
-    const wav = pcmToWav(Buffer.from(b64, "base64"));
+    // gemini-2.5/3.1 TTS models return headerless raw PCM (mimeType ~ "audio/L16;rate=24000"), so we wrap
+    // it in a WAV header ourselves. gemini-3.8+ TTS models changed the default to already-wrapped WAV
+    // (mimeType "audio/wav") — detect that case and pass the bytes straight through instead of double-wrapping.
+    const mimeType = audioPart?.mimeType || "";
+    if (/^audio\/wav/i.test(mimeType)) {
+      return { base64: b64, format: "wav" };
+    }
+    const rateMatch = /rate=(\d+)/i.exec(mimeType);
+    const sampleRate = rateMatch ? Number(rateMatch[1]) : SAMPLE_RATE;
+    const wav = pcmToWav(Buffer.from(b64, "base64"), sampleRate);
     return { base64: wav.toString("base64"), format: "wav" };
   },
 };

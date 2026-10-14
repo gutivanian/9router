@@ -65,6 +65,8 @@ export function TtsExampleCard({ providerId }) {
   const [languageHint, setLanguageHint]     = useState("");
   // Number of stored provider connections (shown when no dashboard API key)
   const [connectionCount, setConnectionCount] = useState(0);
+  // Custom models added via the provider's Models card (not in the static providerModels.js registry)
+  const [customTtsModels, setCustomTtsModels] = useState([]);
 
   useEffect(() => {
     setLocalEndpoint(window.location.origin);
@@ -80,6 +82,18 @@ export function TtsExampleCard({ providerId }) {
       .then((r) => r.json())
       .then((d) => { if (d.publicUrl) setTunnelEndpoint(d.publicUrl); })
       .catch(() => {});
+    const loadCustomModels = () => {
+      fetch("/api/models/custom", { cache: "no-store" })
+        .then((r) => r.json())
+        .then((d) => {
+          const list = (d.models || []).filter((m) => getModelKind(m) === "tts" && m.providerAlias === providerAlias);
+          setCustomTtsModels(list);
+        })
+        .catch(() => {});
+    };
+    loadCustomModels();
+    window.addEventListener("focus", loadCustomModels);
+    window.addEventListener("customModelChanged", loadCustomModels);
 
     // Pre-select default voice based on provider config
     if (config.voiceSource === "hardcoded") {
@@ -109,7 +123,11 @@ export function TtsExampleCard({ providerId }) {
     // api-language (edge-tts, local-device, elevenlabs): NO default load, wait for user to pick language
     // config (nvidia, hyperbolic, deepgram, huggingface, cartesia, playht, coqui, tortoise, inworld, qwen):
     // use ttsConfig.models for model selector; voice is empty by default (backend uses provider default)
-  }, [providerId]);
+    return () => {
+      window.removeEventListener("focus", loadCustomModels);
+      window.removeEventListener("customModelChanged", loadCustomModels);
+    };
+  }, [providerId, providerAlias]);
 
   // Update voices when model changes (voicesPerModel providers)
   useEffect(() => {
@@ -281,8 +299,8 @@ export function TtsExampleCard({ providerId }) {
             </span>
           </Row>
 
-          {/* Model selector — prefer PROVIDER_MODELS[kind=tts], else providerModels via modelKey */}
-          {config.hasModelSelector && (config.modelKey || getModelsByProviderId(providerId).some(m => getModelKind(m) === "tts")) && (
+          {/* Model selector — prefer PROVIDER_MODELS[kind=tts], else providerModels via modelKey, plus any custom models added on the Models card */}
+          {config.hasModelSelector && (config.modelKey || getModelsByProviderId(providerId).some(m => getModelKind(m) === "tts") || customTtsModels.length > 0) && (
             <Row label="Model">
               <select
                 value={selectedModel}
@@ -291,7 +309,10 @@ export function TtsExampleCard({ providerId }) {
               >
                 {(() => {
                   const ttsModels = getModelsByProviderId(providerId).filter(m => getModelKind(m) === "tts");
-                  return (ttsModels.length ? ttsModels : getModelsByProviderId(config.modelKey) || []).map((m) => (
+                  const builtIn = ttsModels.length ? ttsModels : getModelsByProviderId(config.modelKey) || [];
+                  const builtInIds = new Set(builtIn.map((m) => m.id));
+                  const custom = customTtsModels.filter((m) => !builtInIds.has(m.id));
+                  return [...builtIn, ...custom].map((m) => (
                     <option key={m.id} value={m.id}>{m.name || m.id}</option>
                   ));
                 })()}

@@ -21,7 +21,10 @@ const DEFAULT_RESPONSE_EXAMPLE = `{
 export function EmbeddingExampleCard({ providerId, customAlias }) {
   const isCustom = isCustomEmbeddingProvider(providerId);
   const providerAlias = isCustom ? (customAlias || providerId) : getProviderAlias(providerId);
-  const embeddingModels = isCustom ? [] : getModelsByProviderId(providerId).filter((m) => getModelKind(m) === "embedding");
+  const builtinEmbeddingModels = isCustom ? [] : getModelsByProviderId(providerId).filter((m) => getModelKind(m) === "embedding");
+  const [customEmbeddingModels, setCustomEmbeddingModels] = useState([]);
+  const builtinIds = new Set(builtinEmbeddingModels.map((m) => m.id));
+  const embeddingModels = [...builtinEmbeddingModels, ...customEmbeddingModels.filter((m) => !builtinIds.has(m.id))];
 
   const [selectedModel, setSelectedModel] = useState(embeddingModels[0]?.id ?? "");
   const [input, setInput] = useState("The quick brown fox jumps over the lazy dog");
@@ -46,7 +49,24 @@ export function EmbeddingExampleCard({ providerId, customAlias }) {
       .then((r) => r.json())
       .then((d) => { if (d.publicUrl) setTunnelEndpoint(d.publicUrl); })
       .catch(() => {});
-  }, []);
+    if (isCustom) return;
+    const loadCustomModels = () => {
+      fetch("/api/models/custom", { cache: "no-store" })
+        .then((r) => r.json())
+        .then((d) => {
+          const list = (d.models || []).filter((m) => getModelKind(m) === "embedding" && m.providerAlias === providerAlias);
+          setCustomEmbeddingModels(list);
+        })
+        .catch(() => {});
+    };
+    loadCustomModels();
+    window.addEventListener("focus", loadCustomModels);
+    window.addEventListener("customModelChanged", loadCustomModels);
+    return () => {
+      window.removeEventListener("focus", loadCustomModels);
+      window.removeEventListener("customModelChanged", loadCustomModels);
+    };
+  }, [providerAlias, isCustom]);
 
   const endpoint = useTunnel ? tunnelEndpoint : localEndpoint;
   const modelFull = selectedModel ? `${providerAlias}/${selectedModel}` : "";
